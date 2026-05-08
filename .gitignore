@@ -1,0 +1,18 @@
+# Gradle кэш и локальные настройки
+.gradle/
+.gradle-local/
+build/
+
+# Android Studio и IDE
+.idea/
+*.iml
+.kotlin/
+
+# Локальные конфиги
+local.properties
+
+# Скомпилированные файлы в папках модулей
+**/build/
+
+# Temporary SDK inspection folders
+.tmp-*/
