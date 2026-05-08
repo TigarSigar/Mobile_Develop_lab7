@@ -3,6 +3,8 @@ package com.example.buhlograf
 import com.example.buhlograf.data.FakeAnalyticsService
 import com.example.buhlograf.data.InMemoryDrinkRepository
 import com.example.buhlograf.data.LocalFriendsRepository
+import com.example.buhlograf.data.NoOpCloudSyncService
+import com.example.buhlograf.data.StaticRemoteConfigService
 import com.example.buhlograf.domain.AuthService
 import com.example.buhlograf.domain.BuildDashboardUseCase
 import com.example.buhlograf.domain.CalculateMascotMoodUseCase
@@ -75,6 +77,8 @@ class BuhlografViewModelTest {
             authService = auth,
             drinkRepository = drinkRepository,
             friendsRepository = LocalFriendsRepository(),
+            cloudSyncService = NoOpCloudSyncService(),
+            remoteConfigService = StaticRemoteConfigService(),
             buildDashboard = buildDashboard,
             analyticsService = analytics
         )

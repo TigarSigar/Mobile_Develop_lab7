@@ -7,10 +7,14 @@ import com.example.buhlograf.domain.AuthProvider
 import com.example.buhlograf.domain.AuthService
 import com.example.buhlograf.domain.BuildDashboardUseCase
 import com.example.buhlograf.domain.BuildUserIdUseCase
+import com.example.buhlograf.domain.CloudSyncService
 import com.example.buhlograf.domain.DrinkDashboard
 import com.example.buhlograf.domain.DrinkRepository
 import com.example.buhlograf.domain.DrinkType
 import com.example.buhlograf.domain.FriendsRepository
+import com.example.buhlograf.domain.RemoteConfigService
+import com.example.buhlograf.domain.RemoteConfigState
+import com.example.buhlograf.domain.UserProfile
 import com.example.buhlograf.domain.UserSession
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -24,7 +28,9 @@ data class BuhlografUiState(
     val loginMessage: String? = null,
     val friendInput: String = "",
     val friendMessage: String? = null,
-    val aboutDialogVisible: Boolean = false
+    val aboutDialogVisible: Boolean = false,
+    val cloudProfile: UserProfile? = null,
+    val remoteConfig: RemoteConfigState = RemoteConfigState()
 )
 
 enum class AppTab(val title: String) {
@@ -37,6 +43,8 @@ class BuhlografViewModel(
     private val authService: AuthService,
     private val drinkRepository: DrinkRepository,
     private val friendsRepository: FriendsRepository,
+    private val cloudSyncService: CloudSyncService,
+    private val remoteConfigService: RemoteConfigService,
     private val buildDashboard: BuildDashboardUseCase,
     private val analyticsService: AnalyticsService,
     private val buildUserId: BuildUserIdUseCase = BuildUserIdUseCase()
@@ -54,6 +62,10 @@ class BuhlografViewModel(
             name = "screen_viewed",
             params = mapOf("screen_name" to "dashboard")
         )
+        authService.getSavedSession()?.let(::bindCloudSession)
+        remoteConfigService.fetch { config ->
+            _state.update { it.copy(remoteConfig = config) }
+        }
     }
 
     fun enterDemoMode() {
@@ -64,14 +76,23 @@ class BuhlografViewModel(
             params = mapOf("provider" to session.provider.analyticsName)
         )
         _state.update { it.copy(session = session, loginMessage = null) }
+        bindCloudSession(session)
     }
 
-    fun onYandexLoginSuccess(token: String, userName: String) {
+    fun onYandexLoginSuccess(
+        token: String,
+        userName: String,
+        photoUrl: String? = null,
+        email: String? = null,
+        firebaseUid: String? = null
+    ) {
         val session = UserSession(
             token = token,
             userName = userName.ifBlank { "Пользователь Яндекса" },
             provider = AuthProvider.Yandex,
-            userId = buildUserId(AuthProvider.Yandex, token)
+            userId = firebaseUid ?: buildUserId(AuthProvider.Yandex, token),
+            photoUrl = photoUrl,
+            email = email
         )
         authService.saveSession(session)
         analyticsService.trackEvent(
@@ -79,6 +100,7 @@ class BuhlografViewModel(
             params = mapOf("provider" to session.provider.analyticsName)
         )
         _state.update { it.copy(session = session, loginMessage = null) }
+        bindCloudSession(session)
     }
 
     fun onYandexLoginError(message: String) {
@@ -86,12 +108,12 @@ class BuhlografViewModel(
         _state.update { it.copy(loginMessage = message) }
     }
 
-    fun onVkLoginSuccess(token: String, userName: String, photoUrl: String?) {
+    fun onVkLoginSuccess(token: String, userName: String, photoUrl: String?, firebaseUid: String? = null) {
         val session = UserSession(
             token = token,
             userName = userName.ifBlank { "Пользователь VK" },
             provider = AuthProvider.VK,
-            userId = buildUserId(AuthProvider.VK, token),
+            userId = firebaseUid ?: buildUserId(AuthProvider.VK, token),
             photoUrl = photoUrl
         )
         authService.saveSession(session)
@@ -100,6 +122,7 @@ class BuhlografViewModel(
             params = mapOf("provider" to session.provider.analyticsName)
         )
         _state.update { it.copy(session = session, loginMessage = null) }
+        bindCloudSession(session)
     }
 
     fun onVkLoginError(message: String) {
@@ -109,16 +132,18 @@ class BuhlografViewModel(
 
     fun logout() {
         authService.clearSession()
-        _state.update { it.copy(session = null) }
+        cloudSyncService.unbind()
+        _state.update { it.copy(session = null, cloudProfile = null) }
     }
 
-    fun onGoogleLoginSuccess(token: String, userName: String, photoUrl: String?) {
+    fun onGoogleLoginSuccess(token: String, userName: String, photoUrl: String?, email: String? = null, firebaseUid: String? = null) {
         val session = UserSession(
             token = token,
             userName = userName.ifBlank { "Пользователь Google" },
             provider = AuthProvider.Google,
-            userId = buildUserId(AuthProvider.Google, token),
-            photoUrl = photoUrl
+            userId = firebaseUid ?: buildUserId(AuthProvider.Google, token),
+            photoUrl = photoUrl,
+            email = email
         )
         authService.saveSession(session)
         analyticsService.trackEvent(
@@ -126,6 +151,7 @@ class BuhlografViewModel(
             params = mapOf("provider" to session.provider.analyticsName)
         )
         _state.update { it.copy(session = session, loginMessage = null) }
+        bindCloudSession(session)
     }
 
     fun onGoogleLoginError(message: String) {
@@ -220,12 +246,26 @@ class BuhlografViewModel(
             )
         }
     }
+
+    private fun bindCloudSession(session: UserSession) {
+        cloudSyncService.bindSession(
+            session = session,
+            onDataChanged = {
+                _state.update { it.copy(dashboard = buildDashboard()) }
+            },
+            onProfileChanged = { profile ->
+                _state.update { it.copy(cloudProfile = profile) }
+            }
+        )
+    }
 }
 
 class BuhlografViewModelFactory(
     private val authService: AuthService,
     private val drinkRepository: DrinkRepository,
     private val friendsRepository: FriendsRepository,
+    private val cloudSyncService: CloudSyncService,
+    private val remoteConfigService: RemoteConfigService,
     private val buildDashboard: BuildDashboardUseCase,
     private val analyticsService: AnalyticsService
 ) : ViewModelProvider.Factory {
@@ -236,6 +276,8 @@ class BuhlografViewModelFactory(
                 authService = authService,
                 drinkRepository = drinkRepository,
                 friendsRepository = friendsRepository,
+                cloudSyncService = cloudSyncService,
+                remoteConfigService = remoteConfigService,
                 buildDashboard = buildDashboard,
                 analyticsService = analyticsService
             ) as T

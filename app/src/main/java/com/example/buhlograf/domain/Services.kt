@@ -22,3 +22,20 @@ interface FriendsRepository {
     fun getFriends(): List<FriendProgress>
     fun addFriendById(id: String): FriendProgress?
 }
+
+interface CloudSyncService {
+    val isEnabled: Boolean
+    fun bindSession(
+        session: UserSession,
+        onDataChanged: () -> Unit,
+        onProfileChanged: (UserProfile) -> Unit
+    )
+    fun unbind()
+    fun saveProfile(session: UserSession, fcmToken: String?)
+    fun updateFcmToken(userId: String, token: String)
+}
+
+interface RemoteConfigService {
+    fun getState(): RemoteConfigState
+    fun fetch(onUpdated: (RemoteConfigState) -> Unit)
+}

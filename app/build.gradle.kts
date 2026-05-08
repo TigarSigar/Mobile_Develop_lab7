@@ -6,6 +6,11 @@ plugins {
     alias(libs.plugins.kotlin.compose)
 }
 
+val hasGoogleServicesJson = file("google-services.json").exists()
+if (hasGoogleServicesJson) {
+    apply(plugin = "com.google.gms.google-services")
+}
+
 val localProperties = Properties().apply {
     val file = rootProject.file("local.properties")
     if (file.exists()) {
@@ -47,6 +52,8 @@ android {
         manifestPlaceholders["VKIDRedirectScheme"] = "vk$vkAppId"
         buildConfigField("String", "VK_APP_ID", buildConfigString(vkAppId))
         buildConfigField("String", "VK_CLIENT_SECRET", buildConfigString(vkClientSecret))
+        buildConfigField("Boolean", "HAS_GOOGLE_SERVICES_JSON", hasGoogleServicesJson.toString())
+        buildConfigField("String", "GOOGLE_WEB_CLIENT_ID", buildConfigString(localValue("GOOGLE_WEB_CLIENT_ID")))
     }
 
     buildTypes {
@@ -89,6 +96,14 @@ dependencies {
     implementation("androidx.compose.material:material-icons-extended:1.7.8")
     implementation("androidx.security:security-crypto:1.1.0-alpha06")
     implementation("com.google.android.gms:play-services-auth:21.4.0")
+    implementation("io.coil-kt:coil-compose:2.7.0")
+
+    implementation(platform("com.google.firebase:firebase-bom:34.7.0"))
+    implementation("com.google.firebase:firebase-auth")
+    implementation("com.google.firebase:firebase-firestore")
+    implementation("com.google.firebase:firebase-messaging")
+    implementation("com.google.firebase:firebase-analytics")
+    implementation("com.google.firebase:firebase-config")
 
     implementation("io.appmetrica.analytics:analytics:8.1.0")
     implementation("com.yandex.android:authsdk:3.1.3")

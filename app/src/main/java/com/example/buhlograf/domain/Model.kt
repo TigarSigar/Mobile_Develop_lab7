@@ -70,7 +70,23 @@ data class UserSession(
     val userName: String,
     val provider: AuthProvider,
     val userId: String,
-    val photoUrl: String? = null
+    val photoUrl: String? = null,
+    val email: String? = null
+)
+
+data class UserProfile(
+    val userId: String = "",
+    val name: String = "",
+    val email: String = "",
+    val provider: String = "",
+    val photoUrl: String = "",
+    val fcmToken: String = "",
+    val updatedAtMillis: Long = 0L
+)
+
+data class RemoteConfigState(
+    val welcomeBanner: String = "Бухлограф готов к синхронизации.",
+    val experimentalFriendsEnabled: Boolean = true
 )
 
 enum class AuthProvider(val analyticsName: String, val label: String) {

@@ -19,13 +19,15 @@ class SecureAuthService(context: Context) : AuthService {
             ?: return null
         val userId = preferences.getString(KEY_USER_ID, null) ?: return null
         val photoUrl = preferences.getString(KEY_PHOTO_URL, null)
+        val email = preferences.getString(KEY_EMAIL, null)
 
         return UserSession(
             token = token,
             userName = userName,
             provider = provider,
             userId = userId,
-            photoUrl = photoUrl
+            photoUrl = photoUrl,
+            email = email
         )
     }
 
@@ -36,6 +38,7 @@ class SecureAuthService(context: Context) : AuthService {
             .putString(KEY_PROVIDER, session.provider.name)
             .putString(KEY_USER_ID, session.userId)
             .putString(KEY_PHOTO_URL, session.photoUrl)
+            .putString(KEY_EMAIL, session.email)
             .apply()
     }
 
@@ -72,5 +75,6 @@ class SecureAuthService(context: Context) : AuthService {
         const val KEY_PROVIDER = "provider"
         const val KEY_USER_ID = "user_id"
         const val KEY_PHOTO_URL = "photo_url"
+        const val KEY_EMAIL = "email"
     }
 }

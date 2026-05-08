@@ -79,7 +79,10 @@ import com.example.buhlograf.domain.DrinkDashboard
 import com.example.buhlograf.domain.DrinkEntry
 import com.example.buhlograf.domain.DrinkType
 import com.example.buhlograf.domain.FriendProgress
+import com.example.buhlograf.domain.RemoteConfigState
+import com.example.buhlograf.domain.UserProfile
 import com.example.buhlograf.domain.UserSession
+import coil.compose.AsyncImage
 import com.yandex.mapkit.MapKitFactory
 import com.yandex.mapkit.geometry.Point
 import com.yandex.mapkit.map.CameraPosition
@@ -144,6 +147,7 @@ fun BuhlografApp(
                 AppTab.Dashboard -> DashboardScreen(
                     dashboard = state.dashboard,
                     userName = state.session?.userName.orEmpty(),
+                    remoteConfig = state.remoteConfig,
                     onClear = viewModel::clearToday,
                     onLogout = viewModel::logout
                 )
@@ -156,6 +160,7 @@ fun BuhlografApp(
                 )
                 AppTab.Account -> AccountScreen(
                     session = state.session,
+                    cloudProfile = state.cloudProfile,
                     onLogout = viewModel::logout,
                     onInfoClick = viewModel::showAboutDialog
                 )
@@ -253,6 +258,7 @@ private fun LoginScreen(
 private fun DashboardScreen(
     dashboard: DrinkDashboard,
     userName: String,
+    remoteConfig: RemoteConfigState,
     onClear: () -> Unit,
     onLogout: () -> Unit
 ) {
@@ -283,6 +289,19 @@ private fun DashboardScreen(
                 IconButton(onClick = onLogout) {
                     Icon(Icons.AutoMirrored.Filled.Logout, contentDescription = "Выйти", tint = BuhloMuted)
                 }
+            }
+        }
+        item {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = BuhloSurfaceAlt),
+                shape = RoundedCornerShape(8.dp)
+            ) {
+                Text(
+                    text = remoteConfig.welcomeBanner,
+                    color = BuhloCream,
+                    modifier = Modifier.padding(14.dp),
+                    fontSize = 14.sp
+                )
             }
         }
         item {
@@ -557,6 +576,7 @@ private fun FriendCard(friend: FriendProgress) {
 @Composable
 private fun AccountScreen(
     session: UserSession?,
+    cloudProfile: UserProfile?,
     onLogout: () -> Unit,
     onInfoClick: () -> Unit
 ) {
@@ -589,6 +609,7 @@ private fun AccountScreen(
                     horizontalArrangement = Arrangement.spacedBy(16.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
+                    val photoUrl = cloudProfile?.photoUrl?.ifBlank { null } ?: session?.photoUrl
                     Box(
                         modifier = Modifier
                             .size(82.dp)
@@ -596,16 +617,24 @@ private fun AccountScreen(
                             .background(BuhloAmber),
                         contentAlignment = Alignment.Center
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.Person,
-                            contentDescription = null,
-                            tint = Color(0xFF211100),
-                            modifier = Modifier.size(46.dp)
-                        )
+                        if (photoUrl != null) {
+                            AsyncImage(
+                                model = photoUrl,
+                                contentDescription = null,
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        } else {
+                            Icon(
+                                imageVector = Icons.Default.Person,
+                                contentDescription = null,
+                                tint = Color(0xFF211100),
+                                modifier = Modifier.size(46.dp)
+                            )
+                        }
                     }
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = session?.userName ?: "Пользователь",
+                            text = cloudProfile?.name?.ifBlank { null } ?: session?.userName ?: "Пользователь",
                             color = BuhloText,
                             fontSize = 22.sp,
                             fontWeight = FontWeight.Bold
@@ -614,14 +643,22 @@ private fun AccountScreen(
                             text = session?.provider?.label ?: "Неизвестный вход",
                             color = BuhloMuted
                         )
+                        val email = cloudProfile?.email?.ifBlank { null } ?: session?.email
+                        if (email != null) {
+                            Text(
+                                text = email,
+                                color = BuhloMuted,
+                                fontSize = 13.sp
+                            )
+                        }
                         Text(
                             text = "ID: ${session?.userId ?: "-"}",
                             color = BuhloCream,
                             fontSize = 13.sp
                         )
-                        if (session?.photoUrl != null) {
+                        if (cloudProfile?.fcmToken?.isNotBlank() == true) {
                             Text(
-                                text = "Фото профиля получено от провайдера",
+                                text = "FCM-токен сохранен в Firestore",
                                 color = BuhloMuted,
                                 fontSize = 12.sp
                             )
