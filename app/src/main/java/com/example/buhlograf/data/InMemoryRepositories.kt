@@ -105,7 +105,10 @@ class LocalCatalogRepository : CatalogRepository {
     private val suggestions = mutableListOf<ProductSuggestion>()
 
     override fun getProducts(): List<AlcoholProduct> =
-        products.sortedBy { it.name.lowercase() }
+        products.sortedWith(compareByDescending<AlcoholProduct> { it.ratingCount > 0 }
+            .thenByDescending { it.averageRating }
+            .thenByDescending { it.ratingCount }
+            .thenBy { it.name.lowercase() })
 
     override fun getSuggestions(): List<ProductSuggestion> =
         suggestions.filter { it.status == ProductSuggestionStatus.Pending }
@@ -143,6 +146,23 @@ class LocalCatalogRepository : CatalogRepository {
             } else {
                 it
             }
+        }
+        return true
+    }
+
+    override fun rateProduct(productId: String, userId: String, value: Int): Boolean {
+        val rating = value.coerceIn(1, 10)
+        products.replaceAll { product ->
+            if (product.id != productId) return@replaceAll product
+            val old = product.myRating
+            val newCount = if (old == null) product.ratingCount + 1 else product.ratingCount
+            val newSum = product.ratingSum - (old ?: 0) + rating
+            product.copy(
+                ratingSum = newSum,
+                ratingCount = newCount,
+                averageRating = if (newCount > 0) newSum.toDouble() / newCount else 0.0,
+                myRating = rating
+            )
         }
         return true
     }
@@ -199,6 +219,7 @@ class LocalDailyStatsRepository(
                 DailyStats(
                     dayKey = key,
                     totalVolumeMl = entries.sumOf { it.volumeMl },
+                    totalDrinkMl = entries.sumOf { it.volumeMl },
                     totalPureAlcoholMl = entries.sumOf { it.pureAlcoholMl },
                     entriesCount = entries.size,
                     moodFace = moodFace(entries.sumOf { it.pureAlcoholMl }),
@@ -242,6 +263,7 @@ class LocalFriendsRepository : FriendsRepository {
             publicId = normalized,
             name = "Друг $normalized",
             status = "заявка ожидает подтверждения",
+            totalDrinkMl = 0,
             pureAlcoholMl = 0.0,
             streakDays = 0,
             relationStatus = FriendRelationStatus.OutgoingRequest

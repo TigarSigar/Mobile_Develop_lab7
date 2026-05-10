@@ -19,6 +19,8 @@ import com.google.android.gms.auth.api.signin.GoogleSignInOptions
 import com.google.android.gms.common.api.ApiException
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.GoogleAuthProvider
+import com.google.firebase.database.FirebaseDatabase
+import com.google.firebase.firestore.FirebaseFirestore
 import com.example.buhlograf.ui.BuhlografApp
 import com.example.buhlograf.ui.BuhlografTheme
 import com.example.buhlograf.ui.BuhlografViewModel
@@ -40,6 +42,16 @@ import java.net.HttpURLConnection
 import java.net.URL
 
 class MainActivity : ComponentActivity() {
+    override fun onStart() {
+        super.onStart()
+        resumeFirebaseNetwork()
+    }
+
+    override fun onStop() {
+        pauseFirebaseNetwork()
+        super.onStop()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
@@ -224,6 +236,29 @@ class MainActivity : ComponentActivity() {
         if (ContextCompat.checkSelfPermission(this, permission) == PackageManager.PERMISSION_GRANTED) return
         requestPermissions(arrayOf(permission), 7001)
     }
+
+    private fun pauseFirebaseNetwork() {
+        if (!BuildConfig.HAS_GOOGLE_SERVICES_JSON) return
+        runCatching {
+            FirebaseFirestore.getInstance().disableNetwork()
+            firebaseDatabase().goOffline()
+        }
+    }
+
+    private fun resumeFirebaseNetwork() {
+        if (!BuildConfig.HAS_GOOGLE_SERVICES_JSON) return
+        runCatching {
+            FirebaseFirestore.getInstance().enableNetwork()
+            firebaseDatabase().goOnline()
+        }
+    }
+
+    private fun firebaseDatabase(): FirebaseDatabase =
+        if (BuildConfig.FIREBASE_DATABASE_URL.isNotBlank()) {
+            FirebaseDatabase.getInstance(BuildConfig.FIREBASE_DATABASE_URL)
+        } else {
+            FirebaseDatabase.getInstance()
+        }
 
     private data class YandexProfile(
         val name: String,

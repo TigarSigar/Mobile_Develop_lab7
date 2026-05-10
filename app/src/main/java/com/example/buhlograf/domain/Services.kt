@@ -56,6 +56,7 @@ interface CatalogRepository {
     fun addProduct(product: AlcoholProduct, createdBy: String, isAdmin: Boolean): Boolean
     fun updateProduct(product: AlcoholProduct, isAdmin: Boolean): Boolean
     fun setProductActive(productId: String, isActive: Boolean, adminId: String, isAdmin: Boolean): Boolean
+    fun rateProduct(productId: String, userId: String, value: Int): Boolean
     fun submitProduct(
         product: AlcoholProduct,
         createdBy: String,

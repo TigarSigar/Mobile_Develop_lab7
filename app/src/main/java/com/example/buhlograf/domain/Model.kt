@@ -103,6 +103,11 @@ data class AlcoholProduct(
     val volumeMl: Int,
     val strengthPercent: Double,
     val imageUrl: String = "",
+    val recommendedPriceRub: Int? = null,
+    val ratingSum: Int = 0,
+    val ratingCount: Int = 0,
+    val averageRating: Double = 0.0,
+    val myRating: Int? = null,
     val source: ProductSource = ProductSource.Manual,
     val isVerified: Boolean = false,
     val tags: List<String> = ProductTag.defaultFor(category),
@@ -115,6 +120,9 @@ data class AlcoholProduct(
 ) {
     val pureAlcoholPerBottleMl: Double
         get() = volumeMl * (strengthPercent / 100.0)
+
+    val hasRating: Boolean
+        get() = ratingCount > 0
 }
 
 enum class ProductSuggestionStatus {
@@ -142,6 +150,7 @@ sealed interface CatalogLoadState {
 data class DailyStats(
     val dayKey: String = "",
     val totalVolumeMl: Int = 0,
+    val totalDrinkMl: Int = totalVolumeMl,
     val totalPureAlcoholMl: Double = 0.0,
     val entriesCount: Int = 0,
     val moodFace: String = "😭",
@@ -249,6 +258,7 @@ data class FriendProgress(
     val publicId: String = id,
     val name: String,
     val status: String,
+    val totalDrinkMl: Int = 0,
     val pureAlcoholMl: Double,
     val streakDays: Int,
     val photoUrl: String = "",
@@ -341,5 +351,6 @@ data class DrinkDashboard(
     val totalVolumeMl: Int,
     val totalPureAlcoholMl: Double,
     val mood: MascotMood,
+    val mascot: MascotVariant,
     val friendProgress: List<FriendProgress>
 )

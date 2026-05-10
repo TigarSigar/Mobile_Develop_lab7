@@ -2,6 +2,7 @@ package com.example.buhlograf.ui
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.viewModelScope
 import com.example.buhlograf.domain.AlcoholCategory
 import com.example.buhlograf.domain.AlcoholProduct
 import com.example.buhlograf.domain.AnalyticsService
@@ -27,12 +28,15 @@ import com.example.buhlograf.domain.RemoteConfigService
 import com.example.buhlograf.domain.RemoteConfigState
 import com.example.buhlograf.domain.UserProfile
 import com.example.buhlograf.domain.UserSession
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
 import java.time.LocalDate
 import java.time.YearMonth
 import java.time.format.DateTimeFormatter
+import java.util.concurrent.atomic.AtomicBoolean
 
 enum class ProductVisibilityFilter(val title: String) {
     Active("Активные"),
@@ -60,6 +64,7 @@ data class BuhlografUiState(
     val moderationSuggestion: ProductSuggestion? = null,
     val editingProduct: AlcoholProduct? = null,
     val selectedTag: String? = null,
+    val areCatalogTagsExpanded: Boolean = true,
     val productVisibilityFilter: ProductVisibilityFilter = ProductVisibilityFilter.Active,
     val calendar: CalendarUiState? = null
 ) {
@@ -343,6 +348,22 @@ class BuhlografViewModel(
         _state.update { it.copy(selectedTag = tag) }
     }
 
+    fun toggleCatalogTags() {
+        _state.update { it.copy(areCatalogTagsExpanded = !it.areCatalogTagsExpanded) }
+    }
+
+    fun rateProduct(productId: String, value: Int) {
+        val session = _state.value.session ?: return
+        val saved = catalogRepository.rateProduct(productId, session.userId, value)
+        if (saved) {
+            analyticsService.trackEvent(
+                name = "product_rated",
+                params = mapOf("product_id" to productId, "rating" to value.coerceIn(1, 10))
+            )
+            refreshCatalog()
+        }
+    }
+
     fun selectProductVisibilityFilter(filter: ProductVisibilityFilter) {
         _state.update { it.copy(productVisibilityFilter = filter) }
     }
@@ -355,6 +376,7 @@ class BuhlografViewModel(
         volumeMl: Int,
         strengthPercent: Double,
         imageUrl: String,
+        recommendedPriceRub: Int?,
         tags: List<String>
     ) {
         val state = _state.value
@@ -375,6 +397,7 @@ class BuhlografViewModel(
             volumeMl = volumeMl.coerceAtLeast(1),
             strengthPercent = strengthPercent.coerceIn(0.0, 96.0),
             imageUrl = imageUrl.trim(),
+            recommendedPriceRub = recommendedPriceRub?.coerceAtLeast(0)?.takeIf { it > 0 },
             source = if (isAdmin) ProductSource.Admin else ProductSource.UserSuggested,
             isVerified = isAdmin,
             tags = tags.ifEmpty { ProductTag.defaultFor(category) },
@@ -413,6 +436,7 @@ class BuhlografViewModel(
         volumeMl: Int,
         strengthPercent: Double,
         imageUrl: String,
+        recommendedPriceRub: Int?,
         tags: List<String>
     ) {
         val session = _state.value.session ?: return
@@ -428,6 +452,7 @@ class BuhlografViewModel(
             volumeMl = volumeMl.coerceAtLeast(1),
             strengthPercent = strengthPercent.coerceIn(0.0, 96.0),
             imageUrl = imageUrl.trim(),
+            recommendedPriceRub = recommendedPriceRub?.coerceAtLeast(0)?.takeIf { it > 0 },
             tags = tags.ifEmpty { ProductTag.defaultFor(category) },
             updatedBy = session.userId,
             updatedAtMillis = System.currentTimeMillis()
@@ -476,6 +501,7 @@ class BuhlografViewModel(
         volumeMl: Int,
         strengthPercent: Double,
         imageUrl: String,
+        recommendedPriceRub: Int?,
         tags: List<String>
     ) {
         val session = _state.value.session ?: return
@@ -491,6 +517,7 @@ class BuhlografViewModel(
             volumeMl = volumeMl.coerceAtLeast(1),
             strengthPercent = strengthPercent.coerceIn(0.0, 96.0),
             imageUrl = imageUrl.trim(),
+            recommendedPriceRub = recommendedPriceRub?.coerceAtLeast(0)?.takeIf { it > 0 },
             tags = tags.ifEmpty { ProductTag.defaultFor(category) },
             source = ProductSource.Admin,
             isVerified = true
@@ -548,15 +575,36 @@ class BuhlografViewModel(
 
     private fun saveLoggedSession(session: UserSession) {
         _state.update { it.copy(loginMessage = "Проверяем профиль по почте...") }
+        val resolved = AtomicBoolean(false)
+        fun continueLogin(resolvedSession: UserSession) {
+            if (!resolved.compareAndSet(false, true)) return
+            runCatching {
+                authService.saveSession(resolvedSession)
+                analyticsService.trackEvent(
+                    name = "user_logged_in",
+                    params = mapOf("provider" to resolvedSession.provider.analyticsName)
+                )
+                _state.update { it.copy(session = resolvedSession, loginMessage = null) }
+                bindCloudSession(resolvedSession)
+                startCatalogListening()
+            }.onFailure { error ->
+                analyticsService.trackError("Login finalization failed", error)
+                authService.clearSession()
+                cloudSyncService.unbind()
+                _state.update {
+                    it.copy(
+                        session = null,
+                        loginMessage = error.localizedMessage ?: "Не удалось открыть аккаунт после входа."
+                    )
+                }
+            }
+        }
+        viewModelScope.launch {
+            delay(5000)
+            continueLogin(session)
+        }
         cloudSyncService.resolveSessionByEmail(session) { resolvedSession ->
-            authService.saveSession(resolvedSession)
-            analyticsService.trackEvent(
-                name = "user_logged_in",
-                params = mapOf("provider" to resolvedSession.provider.analyticsName)
-            )
-            _state.update { it.copy(session = resolvedSession, loginMessage = null) }
-            bindCloudSession(resolvedSession)
-            startCatalogListening()
+            continueLogin(resolvedSession)
         }
     }
 

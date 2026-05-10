@@ -10,6 +10,8 @@ build/
 
 # Локальные конфиги
 local.properties
+firebase-service-account.json
+*firebase-adminsdk*.json
 
 # Скомпилированные файлы в папках модулей
 **/build/

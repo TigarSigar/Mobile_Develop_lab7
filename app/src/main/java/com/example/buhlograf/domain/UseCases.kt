@@ -27,11 +27,13 @@ class BuildDashboardUseCase(
 ) {
     operator fun invoke(): DrinkDashboard {
         val entries = drinkRepository.getEntries()
+        val mood = calculateMascotMood(entries)
         return DrinkDashboard(
             entries = entries,
             totalVolumeMl = entries.sumOf { it.volumeMl },
             totalPureAlcoholMl = entries.sumOf { it.pureAlcoholMl },
-            mood = calculateMascotMood(entries),
+            mood = mood,
+            mascot = MascotCatalog.variantFor(mood, entries),
             friendProgress = friendsRepository.getFriends()
         )
     }

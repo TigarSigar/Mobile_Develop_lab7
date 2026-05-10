@@ -1,6 +1,10 @@
 package com.example.buhlograf.data
 
+import android.content.Context
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
+import com.example.buhlograf.push.BuhloNotificationCenter
 import com.example.buhlograf.domain.AlcoholCategory
 import com.example.buhlograf.domain.AlcoholProduct
 import com.example.buhlograf.domain.CatalogLoadState
@@ -37,9 +41,11 @@ import com.google.firebase.remoteconfig.FirebaseRemoteConfigSettings
 import java.util.concurrent.atomic.AtomicLong
 
 class FirebaseBuhlografRepository(
+    context: Context,
     private val firestore: FirebaseFirestore,
     private val realtimeDatabase: FirebaseDatabase
 ) : DrinkRepository, FriendsRepository, CloudSyncService, CatalogRepository, DailyStatsRepository {
+    private val notifications = BuhloNotificationCenter(context.applicationContext)
     private val ids = AtomicLong(System.currentTimeMillis())
     private val entries = mutableListOf<DrinkEntry>()
     private val products = mutableListOf<AlcoholProduct>()
@@ -59,6 +65,11 @@ class FirebaseBuhlografRepository(
     private var onCatalogChanged: (() -> Unit)? = null
     private var catalogListener: ListenerRegistration? = null
     private var suggestionsListener: ValueEventListener? = null
+    private var currentIsAdmin: Boolean = false
+    private val shownNotifications = mutableSetOf<String>()
+    private var suggestionsSnapshotInitialized = false
+    private var friendsSnapshotInitialized = false
+    private var requestsSnapshotInitialized = false
 
     override val isEnabled: Boolean = true
 
@@ -181,7 +192,12 @@ class FirebaseBuhlografRepository(
     }
 
     override fun getProducts(): List<AlcoholProduct> =
-        products.ifEmpty { defaultProducts() }.sortedBy { it.name.lowercase() }
+        products.ifEmpty { defaultProducts() }.sortedWith(
+            compareByDescending<AlcoholProduct> { it.ratingCount > 0 }
+                .thenByDescending { it.averageRating }
+                .thenByDescending { it.ratingCount }
+                .thenBy { it.name.lowercase() }
+        )
 
     override fun getSuggestions(): List<ProductSuggestion> =
         suggestions
@@ -197,10 +213,18 @@ class FirebaseBuhlografRepository(
             onCatalogChanged?.invoke()
             return
         }
+        Handler(Looper.getMainLooper()).postDelayed({
+            if (catalogLoadState is CatalogLoadState.Loading && products.isEmpty()) {
+                products += defaultProducts()
+                catalogLoadState = CatalogLoadState.Ready(fromCache = true)
+                onCatalogChanged?.invoke()
+            }
+        }, 7000)
         catalogListener = firestore.collection(PRODUCTS).addSnapshotListener { snapshot, error ->
             if (error != null) {
                 Log.w(TAG, "Products listen failed", error)
                 catalogLoadState = if (products.isEmpty()) {
+                    products += defaultProducts()
                     CatalogLoadState.Error(error.localizedMessage ?: "Не удалось загрузить каталог")
                 } else {
                     CatalogLoadState.Ready(fromCache = true)
@@ -215,6 +239,7 @@ class FirebaseBuhlografRepository(
             if (products.isEmpty()) {
                 products += defaultProducts()
             }
+            loadMyRatings()
             catalogLoadState = CatalogLoadState.Ready(fromCache = snapshot?.metadata?.isFromCache == true)
             onCatalogChanged?.invoke()
         }
@@ -231,7 +256,32 @@ class FirebaseBuhlografRepository(
         val listener = object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
                 suggestions.clear()
-                snapshot.children.mapNotNull { it.toProductSuggestion() }.let(suggestions::addAll)
+            snapshot.children.mapNotNull { it.toProductSuggestion() }.let(suggestions::addAll)
+                suggestions.forEach { suggestion ->
+                    val session = currentSession
+                    if (suggestionsSnapshotInitialized && suggestion.status == ProductSuggestionStatus.Pending && currentIsAdmin) {
+                        showOnce(
+                            key = "admin_suggestion_${suggestion.id}",
+                            channel = BuhloNotificationCenter.Channel.Admin,
+                            title = "Новая заявка на напиток",
+                            body = "${suggestion.product.name} ждёт модерации",
+                            screen = "catalog"
+                        )
+                    }
+                    if (suggestionsSnapshotInitialized && session != null &&
+                        suggestion.authorId == session.userId &&
+                        suggestion.status == ProductSuggestionStatus.Approved
+                    ) {
+                        showOnce(
+                            key = "suggestion_approved_${suggestion.id}",
+                            channel = BuhloNotificationCenter.Channel.Catalog,
+                            title = "Напиток одобрен",
+                            body = "${suggestion.product.name} появился в ассортименте",
+                            screen = "catalog"
+                        )
+                    }
+                }
+                suggestionsSnapshotInitialized = true
                 onChanged()
             }
 
@@ -301,6 +351,60 @@ class FirebaseBuhlografRepository(
             SetOptions.merge()
         )
         onCatalogChanged?.invoke()
+        return true
+    }
+
+    override fun rateProduct(productId: String, userId: String, value: Int): Boolean {
+        if (productId.isBlank() || userId.isBlank()) return false
+        val rating = value.coerceIn(1, 10)
+        val productRef = firestore.collection(PRODUCTS).document(productId)
+        val ratingRef = productRef.collection(RATINGS).document(userId)
+        firestore.runTransaction { transaction ->
+            val productSnapshot = transaction.get(productRef)
+            val previous = transaction.get(ratingRef).getLong("value")?.toInt()
+            val oldSum = productSnapshot.getLong("ratingSum")?.toInt() ?: 0
+            val oldCount = productSnapshot.getLong("ratingCount")?.toInt() ?: 0
+            val newCount = if (previous == null) oldCount + 1 else oldCount
+            val newSum = oldSum - (previous ?: 0) + rating
+            transaction.set(
+                ratingRef,
+                mapOf(
+                    "userId" to userId,
+                    "value" to rating,
+                    "updatedAtMillis" to System.currentTimeMillis()
+                ),
+                SetOptions.merge()
+            )
+            transaction.set(
+                productRef,
+                mapOf(
+                    "ratingSum" to newSum,
+                    "ratingCount" to newCount,
+                    "averageRating" to if (newCount > 0) newSum.toDouble() / newCount else 0.0,
+                    "updatedAtMillis" to System.currentTimeMillis()
+                ),
+                SetOptions.merge()
+            )
+        }.addOnSuccessListener {
+            products.replaceAll { product ->
+                if (product.id == productId) {
+                    val old = product.myRating
+                    val newCount = if (old == null) product.ratingCount + 1 else product.ratingCount
+                    val newSum = product.ratingSum - (old ?: 0) + rating
+                    product.copy(
+                        ratingSum = newSum,
+                        ratingCount = newCount,
+                        averageRating = if (newCount > 0) newSum.toDouble() / newCount else 0.0,
+                        myRating = rating
+                    )
+                } else {
+                    product
+                }
+            }
+            onCatalogChanged?.invoke()
+        }.addOnFailureListener { error ->
+            Log.w(TAG, "Product rating failed", error)
+        }
         return true
     }
 
@@ -497,6 +601,7 @@ class FirebaseBuhlografRepository(
                 "name" to request.fromName,
                 "photoUrl" to request.fromPhotoUrl,
                 "status" to "друг подтвержден",
+                "totalDrinkMl" to 0,
                 "pureAlcoholMl" to 0.0,
                 "streakDays" to 0,
                 "relationStatus" to FriendRelationStatus.Accepted.name,
@@ -513,6 +618,7 @@ class FirebaseBuhlografRepository(
                 "name" to session.userName,
                 "photoUrl" to session.photoUrl.orEmpty(),
                 "status" to "друг подтвержден",
+                "totalDrinkMl" to entries.sumOf { it.volumeMl },
                 "pureAlcoholMl" to entries.sumOf { it.pureAlcoholMl },
                 "streakDays" to 0,
                 "relationStatus" to FriendRelationStatus.Accepted.name,
@@ -591,6 +697,7 @@ class FirebaseBuhlografRepository(
                 return@addSnapshotListener
             }
             snapshot?.toUserProfile()?.let { profile ->
+                currentIsAdmin = profile.isAdmin
                 if (profile.publicId.isNotBlank() && currentSession?.userId == profile.userId) {
                     currentSession = currentSession?.copy(publicId = profile.publicId)
                 }
@@ -618,6 +725,16 @@ class FirebaseBuhlografRepository(
             snapshot?.documents
                 ?.mapNotNull { it.toFriendProgress() }
                 ?.let(acceptedFriends::addAll)
+            acceptedFriends.forEach { friend ->
+                if (friendsSnapshotInitialized) showOnce(
+                    key = "accepted_friend_${friend.publicId}",
+                    channel = BuhloNotificationCenter.Channel.Friends,
+                    title = "Заявка принята",
+                    body = "${friend.name} теперь у тебя в друзьях",
+                    screen = "friends"
+                )
+            }
+            friendsSnapshotInitialized = true
             notifyDataChanged()
         }
         listeners += firestore.collection(PUBLIC_PROFILES).addSnapshotListener { snapshot, error ->
@@ -634,6 +751,8 @@ class FirebaseBuhlografRepository(
                         dailyStatsByPublicId[it.publicId] = mutableListOf(
                             DailyStats(
                                 dayKey = formatDayKey(System.currentTimeMillis()),
+                                totalVolumeMl = it.totalDrinkMl,
+                                totalDrinkMl = it.totalDrinkMl,
                                 totalPureAlcoholMl = it.pureAlcoholMl,
                                 entriesCount = if (it.pureAlcoholMl > 0.0) 1 else 0,
                                 moodFace = moodFace(it.pureAlcoholMl),
@@ -656,8 +775,16 @@ class FirebaseBuhlografRepository(
                 document.toIncomingRequest()?.let { request ->
                     incomingRequests[request.fromPublicId] = request
                     incomingFriends += request.toFriendProgress()
+                    if (requestsSnapshotInitialized) showOnce(
+                        key = "friend_request_${request.fromPublicId}",
+                        channel = BuhloNotificationCenter.Channel.Friends,
+                        title = "Новая заявка в друзья",
+                        body = "${request.fromName} хочет добавить тебя в друзья",
+                        screen = "friends"
+                    )
                 }
             }
+            requestsSnapshotInitialized = true
             notifyDataChanged()
         }
         listeners += userDocument.collection(SENT_REQUESTS).addSnapshotListener { snapshot, error ->
@@ -668,7 +795,18 @@ class FirebaseBuhlografRepository(
             outgoingFriends.clear()
             snapshot?.documents
                 ?.mapNotNull { it.toOutgoingFriend() }
-                ?.let(outgoingFriends::addAll)
+                ?.let { outgoing ->
+                    outgoingFriends.addAll(outgoing)
+                    outgoing.filter { it.relationStatus == FriendRelationStatus.Accepted }.forEach { friend ->
+                        showOnce(
+                            key = "friend_accepted_${friend.publicId}",
+                            channel = BuhloNotificationCenter.Channel.Friends,
+                            title = "Заявка принята",
+                            body = "${friend.name} теперь у тебя в друзьях",
+                            screen = "friends"
+                        )
+                    }
+                }
             notifyDataChanged()
         }
     }
@@ -692,6 +830,11 @@ class FirebaseBuhlografRepository(
         hiddenSuggestionAuthors.clear()
         dailyStatsByPublicId.clear()
         publicEntriesByPublicId.clear()
+        currentIsAdmin = false
+        shownNotifications.clear()
+        suggestionsSnapshotInitialized = false
+        friendsSnapshotInitialized = false
+        requestsSnapshotInitialized = false
     }
 
     override fun saveProfile(session: UserSession, fcmToken: String?) {
@@ -732,11 +875,13 @@ class FirebaseBuhlografRepository(
                     "provider" to session.provider.analyticsName,
                     "photoUrl" to session.photoUrl.orEmpty(),
                     "pureAlcoholMl" to pureAlcoholMl,
+                    "totalDrinkMl" to entries.sumOf { it.volumeMl },
                     "moodFace" to FriendProgress(
                         id = publicId,
                         publicId = publicId,
                         name = session.userName,
                         status = "",
+                        totalDrinkMl = entries.sumOf { it.volumeMl },
                         pureAlcoholMl = pureAlcoholMl,
                         streakDays = 0
                     ).moodFace,
@@ -745,6 +890,7 @@ class FirebaseBuhlografRepository(
                         publicId = publicId,
                         name = session.userName,
                         status = "",
+                        totalDrinkMl = entries.sumOf { it.volumeMl },
                         pureAlcoholMl = pureAlcoholMl,
                         streakDays = 0
                     ).moodTitle,
@@ -755,7 +901,7 @@ class FirebaseBuhlografRepository(
         }
     }
 
-    private fun updateStatsAndProfile(session: UserSession) {
+    private fun updateStatsAndProfile(session: UserSession) = runCatching {
         val activeSession = currentSession?.takeIf { it.userId == session.userId } ?: session
         val publicId = activeSession.publicId.ifBlank { PublicIdGenerator.fromUserId(activeSession.userId) }
         val stats = buildStats(entries)
@@ -788,10 +934,14 @@ class FirebaseBuhlografRepository(
                 SetOptions.merge()
             )
         }
-        batch.commit().addOnFailureListener { error ->
-            Log.w(TAG, "Daily stats update failed", error)
+        if (stats.isNotEmpty()) {
+            batch.commit().addOnFailureListener { error ->
+                Log.w(TAG, "Daily stats update failed", error)
+            }
         }
         saveProfile(activeSession, FcmTokenStore.lastToken)
+    }.onFailure { error ->
+        Log.w(TAG, "Stats/profile update failed", error)
     }
 
     override fun updateFcmToken(userId: String, token: String) {
@@ -813,6 +963,35 @@ class FirebaseBuhlografRepository(
 
     private fun notifyDataChanged() {
         onDataChanged?.invoke()
+    }
+
+    private fun loadMyRatings() {
+        val userId = currentSession?.userId ?: return
+        products.forEach { product ->
+            firestore.collection(PRODUCTS)
+                .document(product.id)
+                .collection(RATINGS)
+                .document(userId)
+                .get()
+                .addOnSuccessListener { snapshot ->
+                    val rating = snapshot.getLong("value")?.toInt()?.coerceIn(1, 10) ?: return@addOnSuccessListener
+                    products.replaceAll {
+                        if (it.id == product.id) it.copy(myRating = rating) else it
+                    }
+                    onCatalogChanged?.invoke()
+                }
+        }
+    }
+
+    private fun showOnce(
+        key: String,
+        channel: BuhloNotificationCenter.Channel,
+        title: String,
+        body: String,
+        screen: String
+    ) {
+        if (!shownNotifications.add(key)) return
+        notifications.show(channel, key, title, body, screen)
     }
 
     private fun replaceOutgoing(publicId: String, friend: FriendProgress) {
@@ -867,6 +1046,10 @@ class FirebaseBuhlografRepository(
         "volumeMl" to volumeMl,
         "strengthPercent" to strengthPercent,
         "imageUrl" to imageUrl,
+        "recommendedPriceRub" to (recommendedPriceRub ?: 0),
+        "ratingSum" to ratingSum,
+        "ratingCount" to ratingCount,
+        "averageRating" to averageRating,
         "source" to source.name,
         "isVerified" to isVerified,
         "tags" to tags,
@@ -880,6 +1063,8 @@ class FirebaseBuhlografRepository(
 
     private fun DocumentSnapshot.toAlcoholProduct(): AlcoholProduct? {
         val name = getString("name") ?: return null
+        val ratingSum = getLong("ratingSum")?.toInt() ?: 0
+        val ratingCount = getLong("ratingCount")?.toInt() ?: 0
         return AlcoholProduct(
             id = getString("id") ?: id,
             barcode = getString("barcode").orEmpty(),
@@ -890,6 +1075,10 @@ class FirebaseBuhlografRepository(
             volumeMl = getLong("volumeMl")?.toInt() ?: 0,
             strengthPercent = getDouble("strengthPercent") ?: 0.0,
             imageUrl = getString("imageUrl").orEmpty(),
+            recommendedPriceRub = getLong("recommendedPriceRub")?.toInt()?.takeIf { it > 0 },
+            ratingSum = ratingSum,
+            ratingCount = ratingCount,
+            averageRating = getDouble("averageRating") ?: if (ratingCount > 0) ratingSum.toDouble() / ratingCount else 0.0,
             source = getString("source")?.let { runCatching { ProductSource.valueOf(it) }.getOrNull() }
                 ?: ProductSource.Imported,
             isVerified = getBoolean("isVerified") ?: false,
@@ -948,6 +1137,10 @@ class FirebaseBuhlografRepository(
             volumeMl = productSnapshot.childLong("volumeMl").toInt().takeIf { it > 0 } ?: 500,
             strengthPercent = productSnapshot.childDouble("strengthPercent"),
             imageUrl = productSnapshot.childString("imageUrl"),
+            recommendedPriceRub = productSnapshot.childLong("recommendedPriceRub").toInt().takeIf { it > 0 },
+            ratingSum = productSnapshot.childLong("ratingSum").toInt(),
+            ratingCount = productSnapshot.childLong("ratingCount").toInt(),
+            averageRating = productSnapshot.childDouble("averageRating"),
             source = productSnapshot.childString("source")
                 .let { runCatching { ProductSource.valueOf(it) }.getOrDefault(ProductSource.UserSuggested) },
             isVerified = productSnapshot.childBool("isVerified"),
@@ -1008,6 +1201,9 @@ class FirebaseBuhlografRepository(
             name = getString("name") ?: "Друг $publicId",
             status = getString("status") ?: "друг подтвержден",
             pureAlcoholMl = getDouble("pureAlcoholMl") ?: 0.0,
+            totalDrinkMl = getLong("totalDrinkMl")?.toInt()
+                ?: getLong("totalVolumeMl")?.toInt()
+                ?: 0,
             streakDays = getLong("streakDays")?.toInt() ?: 0,
             photoUrl = getString("photoUrl").orEmpty(),
             relationStatus = FriendRelationStatus.Accepted
@@ -1031,6 +1227,7 @@ class FirebaseBuhlografRepository(
             publicId = fromPublicId,
             name = fromName,
             status = "хочет добавить вас в друзья",
+            totalDrinkMl = 0,
             pureAlcoholMl = 0.0,
             streakDays = 0,
             photoUrl = fromPhotoUrl,
@@ -1044,6 +1241,7 @@ class FirebaseBuhlografRepository(
             publicId = targetPublicId,
             name = getString("targetName") ?: "Друг $targetPublicId",
             status = "заявка отправлена, ждем подтверждения",
+            totalDrinkMl = 0,
             pureAlcoholMl = 0.0,
             streakDays = 0,
             photoUrl = getString("targetPhotoUrl").orEmpty(),
@@ -1058,7 +1256,10 @@ class FirebaseBuhlografRepository(
             publicId = publicId,
             name = getString("name") ?: "Друг $publicId",
             photoUrl = getString("photoUrl").orEmpty(),
-            pureAlcoholMl = getDouble("pureAlcoholMl") ?: 0.0
+            pureAlcoholMl = getDouble("pureAlcoholMl") ?: 0.0,
+            totalDrinkMl = getLong("totalDrinkMl")?.toInt()
+                ?: getLong("totalVolumeMl")?.toInt()
+                ?: 0
         )
     }
 
@@ -1088,9 +1289,11 @@ class FirebaseBuhlografRepository(
             .groupBy { it.dayKey.ifBlank { formatDayKey(it.timestampMillis) } }
             .map { (key, dayEntries) ->
                 val pure = dayEntries.sumOf { it.pureAlcoholMl }
+                val total = dayEntries.sumOf { it.volumeMl }
                 DailyStats(
                     dayKey = key,
-                    totalVolumeMl = dayEntries.sumOf { it.volumeMl },
+                    totalVolumeMl = total,
+                    totalDrinkMl = total,
                     totalPureAlcoholMl = pure,
                     entriesCount = dayEntries.size,
                     moodFace = moodFace(pure),
@@ -1102,6 +1305,7 @@ class FirebaseBuhlografRepository(
     private fun DailyStats.toFirestore(): Map<String, Any> = mapOf(
         "dayKey" to dayKey,
         "totalVolumeMl" to totalVolumeMl,
+        "totalDrinkMl" to totalDrinkMl,
         "totalPureAlcoholMl" to totalPureAlcoholMl,
         "entriesCount" to entriesCount,
         "moodFace" to moodFace,
@@ -1166,6 +1370,7 @@ class FirebaseBuhlografRepository(
             name = profile.name.ifBlank { name },
             photoUrl = profile.photoUrl.ifBlank { photoUrl },
             pureAlcoholMl = profile.pureAlcoholMl,
+            totalDrinkMl = profile.totalDrinkMl,
         )
         return merged.copy(status = merged.moodTitle)
     }
@@ -1182,7 +1387,8 @@ class FirebaseBuhlografRepository(
         val publicId: String,
         val name: String,
         val photoUrl: String,
-        val pureAlcoholMl: Double
+        val pureAlcoholMl: Double,
+        val totalDrinkMl: Int
     )
 
     private companion object {
@@ -1197,6 +1403,7 @@ class FirebaseBuhlografRepository(
         const val FRIENDS = "friends"
         const val FRIEND_REQUESTS = "friend_requests"
         const val SENT_REQUESTS = "sent_requests"
+        const val RATINGS = "ratings"
     }
 }
 
@@ -1219,7 +1426,7 @@ class FirebaseRemoteConfigService(
     init {
         remoteConfig.setDefaultsAsync(
             mapOf(
-                KEY_BANNER to "Бухлограф держит записи рядом и не забывает друзей.",
+                KEY_BANNER to "",
                 KEY_EXPERIMENTAL_FRIENDS to true
             )
         )
@@ -1232,7 +1439,7 @@ class FirebaseRemoteConfigService(
 
     override fun getState(): RemoteConfigState = RemoteConfigState(
         welcomeBanner = remoteConfig.getString(KEY_BANNER).ifBlank {
-            "Бухлограф держит записи рядом и не забывает друзей."
+            ""
         },
         experimentalFriendsEnabled = remoteConfig.getBoolean(KEY_EXPERIMENTAL_FRIENDS)
     )

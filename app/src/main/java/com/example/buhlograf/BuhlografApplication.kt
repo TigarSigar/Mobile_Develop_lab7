@@ -82,6 +82,7 @@ class BuhlografApplication : Application() {
                 FirebaseDatabase.getInstance()
             }
             val firebaseRepository = FirebaseBuhlografRepository(
+                context = this,
                 firestore = FirebaseFirestore.getInstance(),
                 realtimeDatabase = realtimeDatabase
             )

@@ -39,13 +39,19 @@ class PushMessagingService : FirebaseMessagingService() {
 
     private fun showNotification(title: String, body: String, data: Map<String, String>) {
         val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        val channelId = when (data["screen"]) {
+            "friends" -> "friends"
+            "catalog" -> "catalog"
+            "admin" -> "admin"
+            else -> CHANNEL_ID
+        }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                CHANNEL_ID,
-                "Buhlograf push",
-                NotificationManager.IMPORTANCE_DEFAULT
-            )
-            manager.createNotificationChannel(channel)
+            listOf(
+                NotificationChannel("friends", "Друзья", NotificationManager.IMPORTANCE_DEFAULT),
+                NotificationChannel("catalog", "Ассортимент", NotificationManager.IMPORTANCE_DEFAULT),
+                NotificationChannel("admin", "Админка", NotificationManager.IMPORTANCE_DEFAULT),
+                NotificationChannel(CHANNEL_ID, "Buhlograf push", NotificationManager.IMPORTANCE_DEFAULT)
+            ).forEach(manager::createNotificationChannel)
         }
 
         val intent = Intent(this, MainActivity::class.java).apply {
@@ -60,7 +66,7 @@ class PushMessagingService : FirebaseMessagingService() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        val notification = NotificationCompat.Builder(this, CHANNEL_ID)
+        val notification = NotificationCompat.Builder(this, channelId)
             .setSmallIcon(R.mipmap.ic_launcher)
             .setContentTitle(title)
             .setContentText(body)
