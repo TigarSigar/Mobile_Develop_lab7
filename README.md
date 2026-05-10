@@ -1,5 +1,5 @@
 # DRINKS
 
-![Jägermeister](Jagermeister.png)
+![Jägermeister](Jägermeister.png)
 
 ## Jägermeister
