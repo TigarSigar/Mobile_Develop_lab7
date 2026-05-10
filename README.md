@@ -1,7 +1,9 @@
 # DRINKS
 
-![Jagermeiser](Jagermeiser.png)
-
-![Jagermeiser](Jagermeiser.png)
-
 ## Jägermeister
+![Jagermeiser](Jagermeiser.png)
+
+## Vana Tallinn
+![Jagermeiser](Jagermeiser.png)
+
+
