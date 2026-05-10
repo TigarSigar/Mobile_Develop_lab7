@@ -1,10 +1,16 @@
 package com.example.buhlograf.ui
 
+import android.content.Context
 import android.content.Intent
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.net.Uri
+import android.webkit.WebView
+import android.widget.Toast
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -23,9 +29,13 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Login
 import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.Home
@@ -39,6 +49,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FloatingActionButton
@@ -70,15 +81,24 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import com.example.buhlograf.domain.AlcoholCategory
+import com.example.buhlograf.domain.AlcoholProduct
+import com.example.buhlograf.domain.CalendarUiState
+import com.example.buhlograf.domain.CatalogLoadState
 import com.example.buhlograf.domain.DrinkDashboard
 import com.example.buhlograf.domain.DrinkEntry
 import com.example.buhlograf.domain.DrinkType
 import com.example.buhlograf.domain.FriendProgress
+import com.example.buhlograf.domain.FriendRelationStatus
+import com.example.buhlograf.domain.ProductSuggestion
+import com.example.buhlograf.domain.ProductTag
 import com.example.buhlograf.domain.RemoteConfigState
 import com.example.buhlograf.domain.UserProfile
 import com.example.buhlograf.domain.UserSession
@@ -105,6 +125,10 @@ fun BuhlografApp(
     val state by viewModel.state.collectAsState()
 
     if (state.session == null) {
+        if (state.vkMemeVisible) {
+            VkMemeScreen(onBack = viewModel::hideVkMeme)
+            return
+        }
         LoginScreen(
             hasYandexClientId = hasYandexClientId,
             hasVkKeys = hasVkKeys,
@@ -113,6 +137,15 @@ fun BuhlografApp(
             onVkClick = onVkLoginClick,
             onGoogleClick = onGoogleLoginClick,
             onDemoClick = viewModel::enterDemoMode
+        )
+        return
+    }
+
+    if (!state.catalogReady) {
+        CatalogLoadingScreen(
+            loadState = state.catalogLoadState,
+            productsLoaded = state.products.size,
+            onLogout = viewModel::logout
         )
         return
     }
@@ -151,35 +184,173 @@ fun BuhlografApp(
                     onClear = viewModel::clearToday,
                     onLogout = viewModel::logout
                 )
+                AppTab.Catalog -> CatalogScreen(
+                    products = state.products,
+                    suggestions = state.productSuggestions,
+                    isAdmin = state.cloudProfile?.isAdmin == true,
+                    message = state.catalogMessage,
+                    selectedTag = state.selectedTag,
+                    visibilityFilter = state.productVisibilityFilter,
+                    onSelectTag = viewModel::selectCatalogTag,
+                    onSelectVisibility = viewModel::selectProductVisibilityFilter,
+                    onAddProduct = viewModel::showAdminProductDialog,
+                    onEditProduct = viewModel::editProduct,
+                    onSetProductActive = viewModel::setProductActive,
+                    onApproveSuggestion = viewModel::openModeration,
+                    onRejectSuggestion = viewModel::rejectSuggestion,
+                    onHideAuthor = viewModel::hideSuggestionAuthor
+                )
                 AppTab.Friends -> FriendsScreen(
                     friends = state.dashboard.friendProgress,
+                    publicId = state.cloudProfile?.publicId?.ifBlank { null }
+                        ?: state.session?.publicId.orEmpty(),
                     input = state.friendInput,
                     message = state.friendMessage,
                     onInputChange = viewModel::updateFriendInput,
-                    onAddFriend = viewModel::addFriend
+                    onAddFriend = viewModel::addFriend,
+                    onAcceptFriend = viewModel::acceptFriend,
+                    onRejectFriend = viewModel::rejectFriend,
+                    onRemoveFriend = viewModel::removeFriend,
+                    onFriendClick = viewModel::openFriendCalendar
                 )
                 AppTab.Account -> AccountScreen(
                     session = state.session,
                     cloudProfile = state.cloudProfile,
+                    aboutVisible = state.aboutDialogVisible,
+                    hasMapKitKey = hasMapKitKey,
                     onLogout = viewModel::logout,
-                    onInfoClick = viewModel::showAboutDialog
+                    onInfoClick = viewModel::showAboutDialog,
+                    onAboutClose = viewModel::hideAboutDialog,
+                    onProfileClick = viewModel::openOwnCalendar
                 )
             }
         }
     }
 
-    if (state.aboutDialogVisible) {
-        AboutDialog(
-            hasMapKitKey = hasMapKitKey,
-            onDismiss = viewModel::hideAboutDialog
-        )
-    }
-
     if (state.addDrinkDialogVisible) {
         AddDrinkDialog(
+            products = state.products,
             onDismiss = viewModel::hideAddDrinkDialog,
             onAdd = viewModel::addDrink
         )
+    }
+
+    if (state.adminProductDialogVisible) {
+        AdminProductDialog(
+            isAdmin = state.cloudProfile?.isAdmin == true,
+            onDismiss = viewModel::hideAdminProductDialog,
+            onSave = viewModel::addProductFromAdmin
+        )
+    }
+
+    state.moderationSuggestion?.let { suggestion ->
+        AdminProductDialog(
+            isAdmin = true,
+            initialProduct = suggestion.product,
+            title = "Премодерация",
+            onDismiss = viewModel::closeModeration,
+            onSave = { name, brand, description, category, volumeMl, strengthPercent, imageUrl, tags ->
+                viewModel.approveSuggestion(
+                    suggestion.id,
+                    name,
+                    brand,
+                    description,
+                    category,
+                    volumeMl,
+                    strengthPercent,
+                    imageUrl,
+                    tags
+                )
+            }
+        )
+    }
+
+    state.editingProduct?.let { product ->
+        AdminProductDialog(
+            isAdmin = true,
+            initialProduct = product,
+            title = "Редактировать напиток",
+            onDismiss = viewModel::closeProductEditor,
+            onSave = viewModel::updateExistingProduct
+        )
+    }
+
+    state.calendar?.let { calendar ->
+        CalendarDialog(
+            calendar = calendar,
+            onSelectDay = viewModel::selectCalendarDay,
+            onDismiss = viewModel::closeCalendar
+        )
+    }
+}
+
+@Composable
+private fun VkMemeScreen(onBack: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(BuhloBackground)
+            .padding(18.dp)
+    ) {
+        Column(
+            modifier = Modifier.fillMaxSize(),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            OutlinedButton(onClick = onBack) {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null)
+                Spacer(Modifier.width(8.dp))
+                Text("Назад")
+            }
+            Text(
+                text = "ВК - контора бюрократов",
+                color = BuhloCream,
+                fontSize = 26.sp,
+                fontWeight = FontWeight.Black
+            )
+            AndroidView(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(Color.Black),
+                factory = { context ->
+                    WebView(context).apply {
+                        setBackgroundColor(android.graphics.Color.BLACK)
+                        settings.loadWithOverviewMode = true
+                        settings.useWideViewPort = true
+                        loadDataWithBaseURL(
+                            "file:///android_asset/",
+                            """
+                                <html>
+                                  <head>
+                                    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                                    <style>
+                                      body {
+                                        margin: 0;
+                                        background: #000000;
+                                        display: flex;
+                                        align-items: center;
+                                        justify-content: center;
+                                        min-height: 100vh;
+                                      }
+                                      img {
+                                        max-width: 100%;
+                                        max-height: 100vh;
+                                        object-fit: contain;
+                                      }
+                                    </style>
+                                  </head>
+                                  <body><img src="vk_reaction.gif" /></body>
+                                </html>
+                            """.trimIndent(),
+                            "text/html",
+                            "UTF-8",
+                            null
+                        )
+                    }
+                }
+            )
+        }
     }
 }
 
@@ -249,6 +420,52 @@ private fun LoginScreen(
                     color = BuhloRed,
                     fontSize = 13.sp
                 )
+            }
+        }
+    }
+}
+
+@Composable
+private fun CatalogLoadingScreen(
+    loadState: CatalogLoadState,
+    productsLoaded: Int,
+    onLogout: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(BuhloBackground)
+            .padding(24.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Card(
+            colors = CardDefaults.cardColors(containerColor = BuhloSurface),
+            shape = RoundedCornerShape(8.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(
+                modifier = Modifier.padding(22.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+                CircularProgressIndicator(color = BuhloAmber)
+                Text(
+                    text = "Загружаем ассортимент",
+                    color = BuhloText,
+                    fontSize = 24.sp,
+                    fontWeight = FontWeight.Black
+                )
+                val message = when (loadState) {
+                    CatalogLoadState.Loading -> "Подготавливаем список напитков. Это обычно занимает пару секунд."
+                    is CatalogLoadState.Ready -> "Найдено напитков: $productsLoaded"
+                    is CatalogLoadState.Error -> "Не удалось загрузить данные: ${loadState.message}"
+                }
+                Text(message, color = BuhloMuted)
+                OutlinedButton(onClick = onLogout, modifier = Modifier.fillMaxWidth()) {
+                    Icon(Icons.AutoMirrored.Filled.Logout, contentDescription = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Выйти")
+                }
             }
         }
     }
@@ -485,13 +702,292 @@ private fun DrinkEntryCard(entry: DrinkEntry) {
 }
 
 @Composable
+@OptIn(ExperimentalLayoutApi::class)
+private fun CatalogScreen(
+    products: List<AlcoholProduct>,
+    suggestions: List<ProductSuggestion>,
+    isAdmin: Boolean,
+    message: String?,
+    selectedTag: String?,
+    visibilityFilter: ProductVisibilityFilter,
+    onSelectTag: (String?) -> Unit,
+    onSelectVisibility: (ProductVisibilityFilter) -> Unit,
+    onAddProduct: () -> Unit,
+    onEditProduct: (AlcoholProduct) -> Unit,
+    onSetProductActive: (String, Boolean) -> Unit,
+    onApproveSuggestion: (ProductSuggestion) -> Unit,
+    onRejectSuggestion: (String) -> Unit,
+    onHideAuthor: (String) -> Unit
+) {
+    var query by remember { mutableStateOf("") }
+    val filtered = remember(products, query, selectedTag, visibilityFilter) {
+        val needle = query.trim().lowercase()
+        val byQuery = if (needle.isBlank()) products else products.filter {
+            it.name.lowercase().contains(needle) ||
+                it.brand.lowercase().contains(needle)
+        }
+        val byTag = selectedTag?.let { tag -> byQuery.filter { tag in it.tags } } ?: byQuery
+        when (visibilityFilter) {
+            ProductVisibilityFilter.Active -> byTag.filter { it.isActive }
+            ProductVisibilityFilter.Hidden -> byTag.filterNot { it.isActive }
+            ProductVisibilityFilter.All -> byTag
+        }
+    }
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(18.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        item {
+            Text("Ассортимент", color = BuhloText, fontSize = 28.sp, fontWeight = FontWeight.Black)
+            Text(
+                "Выбирай напитки из общего списка или предложи свой вариант.",
+                color = BuhloMuted
+            )
+        }
+        item {
+            Button(
+                onClick = onAddProduct,
+                colors = ButtonDefaults.buttonColors(containerColor = BuhloAmber)
+            ) {
+                Icon(Icons.Default.Add, contentDescription = null)
+                Spacer(Modifier.width(8.dp))
+                Text("Добавить напиток")
+            }
+        }
+        if (isAdmin) {
+            item {
+                AssistChip(
+                    onClick = {},
+                    label = {
+                        Text(
+                            if (suggestions.isEmpty()) {
+                                "Админ-режим: новых заявок нет"
+                            } else {
+                                "Админ-режим: заявок ${suggestions.size}"
+                            }
+                        )
+                    },
+                    leadingIcon = {
+                        Icon(Icons.Default.Check, contentDescription = null, tint = BuhloAmber)
+                    }
+                )
+            }
+        }
+        item {
+            OutlinedTextField(
+                value = query,
+                onValueChange = { query = it },
+                label = { Text("Поиск напитка") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+        item {
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                FilterChip(
+                    selected = selectedTag == null,
+                    onClick = { onSelectTag(null) },
+                    label = { Text("Все") }
+                )
+                ProductTag.entries.forEach { tag ->
+                    FilterChip(
+                        selected = selectedTag == tag.title,
+                        onClick = { onSelectTag(tag.title) },
+                        label = { Text(tag.title) }
+                    )
+                }
+            }
+        }
+        if (isAdmin) {
+            item {
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    ProductVisibilityFilter.entries.forEach { filter ->
+                        FilterChip(
+                            selected = visibilityFilter == filter,
+                            onClick = { onSelectVisibility(filter) },
+                            label = { Text(filter.title) }
+                        )
+                    }
+                }
+            }
+        }
+        if (isAdmin && suggestions.isNotEmpty()) {
+            item {
+                Text("Заявки на модерацию", color = BuhloText, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+            }
+            items(suggestions) { suggestion ->
+                SuggestionCard(
+                    suggestion = suggestion,
+                    onApprove = { onApproveSuggestion(suggestion) },
+                    onReject = { onRejectSuggestion(suggestion.id) },
+                    onHideAuthor = { onHideAuthor(suggestion.authorId) }
+                )
+            }
+        }
+        if (message != null) {
+            item { Text(message, color = BuhloMuted, fontSize = 13.sp) }
+        }
+        items(filtered) { product ->
+            ProductCard(
+                product = product,
+                isAdmin = isAdmin,
+                onEdit = { onEditProduct(product) },
+                onToggleActive = { onSetProductActive(product.id, !product.isActive) }
+            )
+        }
+    }
+}
+
+@Composable
+@OptIn(ExperimentalLayoutApi::class)
+private fun ProductCard(
+    product: AlcoholProduct,
+    modifier: Modifier = Modifier,
+    isAdmin: Boolean = false,
+    onEdit: () -> Unit = {},
+    onToggleActive: () -> Unit = {}
+) {
+    Card(
+        modifier = modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = BuhloSurface),
+        shape = RoundedCornerShape(8.dp)
+    ) {
+        Row(
+            modifier = Modifier.padding(14.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(58.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(BuhloSurfaceAlt),
+                contentAlignment = Alignment.Center
+            ) {
+                if (product.imageUrl.isNotBlank()) {
+                    AsyncImage(
+                        model = product.imageUrl,
+                        contentDescription = null,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                } else {
+                    Text(product.category.defaultType.emoji, fontSize = 24.sp)
+                }
+            }
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Text(product.name, color = BuhloText, fontWeight = FontWeight.Bold, maxLines = 2)
+                if (product.brand.isNotBlank()) {
+                    Text(product.brand, color = BuhloMuted, fontSize = 13.sp)
+                }
+                Text(
+                    "${product.category.title} • ${product.volumeMl} мл • ${product.strengthPercent.roundToInt()}%",
+                    color = BuhloCream,
+                    fontSize = 13.sp
+                )
+                if (product.description.isNotBlank()) {
+                    Text(
+                        product.description,
+                        color = BuhloMuted,
+                        fontSize = 12.sp,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+                if (product.tags.isNotEmpty()) {
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        verticalArrangement = Arrangement.spacedBy(2.dp)
+                    ) {
+                        product.tags.take(4).forEach { tag ->
+                            Text(tag, color = BuhloAmber, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+                if (!product.isActive) {
+                    Text("Скрыт", color = BuhloRed, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                }
+                if (isAdmin && !product.id.startsWith("seed-")) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(onClick = onEdit) {
+                            Text("Изменить")
+                        }
+                        TextButton(onClick = onToggleActive) {
+                            Text(if (product.isActive) "Скрыть" else "Вернуть")
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SuggestionCard(
+    suggestion: ProductSuggestion,
+    onApprove: () -> Unit,
+    onReject: () -> Unit,
+    onHideAuthor: () -> Unit
+) {
+    Card(
+        colors = CardDefaults.cardColors(containerColor = BuhloSurfaceAlt),
+        shape = RoundedCornerShape(8.dp)
+    ) {
+        Column(
+            modifier = Modifier.padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Text(
+                "Предложил: ${suggestion.authorName}",
+                color = BuhloMuted,
+                fontSize = 12.sp
+            )
+            ProductCard(product = suggestion.product)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(
+                    onClick = onApprove,
+                    colors = ButtonDefaults.buttonColors(containerColor = BuhloAmber)
+                ) {
+                    Icon(Icons.Default.Check, contentDescription = null)
+                }
+                OutlinedButton(onClick = onReject) {
+                    Icon(Icons.Default.Close, contentDescription = null)
+                }
+                TextButton(onClick = onHideAuthor) {
+                    Text("Скрыть автора")
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun FriendsScreen(
     friends: List<FriendProgress>,
+    publicId: String,
     input: String,
     message: String?,
     onInputChange: (String) -> Unit,
-    onAddFriend: () -> Unit
+    onAddFriend: () -> Unit,
+    onAcceptFriend: (String) -> Unit,
+    onRejectFriend: (String) -> Unit,
+    onRemoveFriend: (String) -> Unit,
+    onFriendClick: (FriendProgress) -> Unit
 ) {
+    val clipboard = LocalClipboardManager.current
+    val context = LocalContext.current
+    fun copyPublicId() {
+        if (publicId.isBlank()) return
+        clipboard.setText(AnnotatedString(publicId))
+        Toast.makeText(context, "ID скопирован", Toast.LENGTH_SHORT).show()
+    }
+
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(18.dp),
@@ -500,9 +996,31 @@ private fun FriendsScreen(
         item {
             Text("Друзья", color = BuhloText, fontSize = 28.sp, fontWeight = FontWeight.Black)
             Text(
-                "Добавляй друзей по ID. В следующей лабораторной этот поиск переедет на Firebase.",
+                "Добавляй друзей по короткому ID. Дружба появится только после подтверждения второй стороной.",
                 color = BuhloMuted
             )
+        }
+        item {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = BuhloSurface),
+                shape = RoundedCornerShape(8.dp)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable(onClick = ::copyPublicId)
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Text("Ваш ID", color = BuhloMuted, fontSize = 13.sp)
+                    PublicIdCode(publicId = publicId.ifBlank { "------" })
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.ContentCopy, contentDescription = null, tint = BuhloAmber)
+                        Spacer(Modifier.width(8.dp))
+                        Text("Нажмите, чтобы скопировать", color = BuhloCream, fontSize = 13.sp)
+                    }
+                }
+            }
         }
         item {
             Card(
@@ -526,7 +1044,7 @@ private fun FriendsScreen(
                     ) {
                         Icon(Icons.Default.Add, contentDescription = null)
                         Spacer(Modifier.width(8.dp))
-                        Text("Добавить друга")
+                        Text("Отправить заявку")
                     }
                     if (message != null) {
                         Text(message, color = BuhloMuted, fontSize = 13.sp)
@@ -540,13 +1058,51 @@ private fun FriendsScreen(
             }
         }
         items(friends) { friend ->
-            FriendCard(friend)
+            FriendCard(
+                friend = friend,
+                onAccept = { onAcceptFriend(friend.publicId) },
+                onReject = { onRejectFriend(friend.publicId) },
+                onRemove = { onRemoveFriend(friend.publicId) },
+                onOpenCalendar = { onFriendClick(friend) }
+            )
         }
     }
 }
 
 @Composable
-private fun FriendCard(friend: FriendProgress) {
+private fun PublicIdCode(publicId: String) {
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        publicId.take(6).forEach { char ->
+            Box(
+                modifier = Modifier
+                    .size(38.dp)
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(Color(0xFF0F0D0B))
+                    .border(1.dp, BuhloAmber, RoundedCornerShape(6.dp)),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = char.toString(),
+                    color = BuhloText,
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.Black
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun FriendCard(
+    friend: FriendProgress,
+    onAccept: () -> Unit,
+    onReject: () -> Unit,
+    onRemove: () -> Unit,
+    onOpenCalendar: () -> Unit
+) {
     Card(
         colors = CardDefaults.cardColors(containerColor = BuhloSurface),
         shape = RoundedCornerShape(8.dp)
@@ -554,6 +1110,10 @@ private fun FriendCard(friend: FriendProgress) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .clickable(
+                    enabled = friend.relationStatus == FriendRelationStatus.Accepted,
+                    onClick = onOpenCalendar
+                )
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
@@ -562,13 +1122,76 @@ private fun FriendCard(friend: FriendProgress) {
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(friend.name, color = BuhloText, fontWeight = FontWeight.Bold, fontSize = 18.sp)
-                Text("${friend.streakDays} дн.", color = BuhloAmber, fontWeight = FontWeight.Bold)
+                Text(
+                    friend.name,
+                    color = BuhloText,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 18.sp,
+                    modifier = Modifier.weight(1f),
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+                if (friend.relationStatus == FriendRelationStatus.Accepted) {
+                    Text("${friend.streakDays} дн.", color = BuhloAmber, fontWeight = FontWeight.Bold)
+                }
             }
-            Text("ID: ${friend.id}", color = BuhloCream, fontSize = 13.sp)
-            Text(friend.status, color = BuhloMuted)
-            MiniBar(value = friend.pureAlcoholMl.toFloat(), max = 90f)
-            Text("${friend.glasses} условных делений графика", color = BuhloCream, fontSize = 13.sp)
+            PublicIdCode(publicId = friend.publicId)
+            if (friend.relationStatus == FriendRelationStatus.Accepted) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(44.dp)
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(if (friend.pureAlcoholMl >= 90.0) BuhloRed else BuhloAmber),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            friend.moodFace,
+                            color = Color(0xFF15120F),
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Black
+                        )
+                    }
+                    Column {
+                        Text(friend.moodTitle, color = BuhloText, fontWeight = FontWeight.Bold)
+                        Text(
+                            "${friend.pureAlcoholMl.roundToInt()} мл чистого спирта",
+                            color = BuhloMuted,
+                            fontSize = 13.sp
+                        )
+                    }
+                }
+            } else {
+                Text(friend.status, color = BuhloMuted)
+            }
+            if (friend.relationStatus == FriendRelationStatus.IncomingRequest) {
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Button(
+                        onClick = onAccept,
+                        colors = ButtonDefaults.buttonColors(containerColor = BuhloAmber)
+                    ) {
+                        Icon(Icons.Default.Check, contentDescription = null)
+                        Spacer(Modifier.width(6.dp))
+                        Text("Принять")
+                    }
+                    OutlinedButton(onClick = onReject) {
+                        Icon(Icons.Default.Close, contentDescription = null)
+                        Spacer(Modifier.width(6.dp))
+                        Text("Отклонить")
+                    }
+                }
+            } else if (friend.relationStatus == FriendRelationStatus.Accepted) {
+                MiniBar(value = friend.pureAlcoholMl.toFloat(), max = 90f)
+                Text("${friend.glasses} условных делений графика", color = BuhloCream, fontSize = 13.sp)
+                OutlinedButton(onClick = onRemove, modifier = Modifier.fillMaxWidth()) {
+                    Icon(Icons.Default.Delete, contentDescription = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Удалить из друзей")
+                }
+            }
         }
     }
 }
@@ -577,14 +1200,36 @@ private fun FriendCard(friend: FriendProgress) {
 private fun AccountScreen(
     session: UserSession?,
     cloudProfile: UserProfile?,
+    aboutVisible: Boolean,
+    hasMapKitKey: Boolean,
     onLogout: () -> Unit,
-    onInfoClick: () -> Unit
+    onInfoClick: () -> Unit,
+    onAboutClose: () -> Unit,
+    onProfileClick: () -> Unit
 ) {
+    val clipboard = LocalClipboardManager.current
+    val context = LocalContext.current
+    val publicId = cloudProfile?.publicId?.ifBlank { null } ?: session?.publicId.orEmpty()
+    fun copyPublicId() {
+        if (publicId.isBlank()) return
+        clipboard.setText(AnnotatedString(publicId))
+        Toast.makeText(context, "ID скопирован", Toast.LENGTH_SHORT).show()
+    }
+
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(18.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
+        if (aboutVisible) {
+            item {
+                AboutPanel(
+                    hasMapKitKey = hasMapKitKey,
+                    onClose = onAboutClose
+                )
+            }
+            return@LazyColumn
+        }
         item {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -605,6 +1250,7 @@ private fun AccountScreen(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
+                        .clickable(onClick = onProfileClick)
                         .padding(18.dp),
                     horizontalArrangement = Arrangement.spacedBy(16.dp),
                     verticalAlignment = Alignment.CenterVertically
@@ -651,17 +1297,41 @@ private fun AccountScreen(
                                 fontSize = 13.sp
                             )
                         }
-                        Text(
-                            text = "ID: ${session?.userId ?: "-"}",
-                            color = BuhloCream,
-                            fontSize = 13.sp
-                        )
-                        if (cloudProfile?.fcmToken?.isNotBlank() == true) {
-                            Text(
-                                text = "FCM-токен сохранен в Firestore",
-                                color = BuhloMuted,
-                                fontSize = 12.sp
+                        if (cloudProfile?.isAdmin == true) {
+                            AssistChip(
+                                onClick = {},
+                                label = { Text("Админский аккаунт") },
+                                leadingIcon = {
+                                    Icon(
+                                        Icons.Default.Check,
+                                        contentDescription = null,
+                                        tint = BuhloAmber
+                                    )
+                                }
                             )
+                        }
+                        Column(
+                            modifier = Modifier
+                                .padding(top = 8.dp)
+                                .clickable(onClick = ::copyPublicId),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Text("ID для друзей", color = BuhloMuted, fontSize = 12.sp)
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    text = publicId.ifBlank { "------" },
+                                    color = BuhloText,
+                                    fontSize = 16.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                Icon(
+                                    Icons.Default.ContentCopy,
+                                    contentDescription = null,
+                                    tint = BuhloAmber,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
                         }
                     }
                 }
@@ -697,34 +1367,32 @@ private fun MiniBar(value: Float, max: Float) {
 }
 
 @Composable
-private fun AboutDialog(hasMapKitKey: Boolean, onDismiss: () -> Unit) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        confirmButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Закрыть")
+private fun AboutPanel(hasMapKitKey: Boolean, onClose: () -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("О нас", color = BuhloText, fontSize = 28.sp, fontWeight = FontWeight.Black)
+            IconButton(onClick = onClose) {
+                Icon(Icons.Default.Close, contentDescription = "Закрыть", tint = BuhloAmber)
             }
-        },
-        title = { Text("О нас") },
-        text = {
-            AboutScreenContent(hasMapKitKey = hasMapKitKey)
-        },
-        containerColor = BuhloSurface,
-        titleContentColor = BuhloText,
-        textContentColor = BuhloText
-    )
+        }
+        AboutScreenContent(hasMapKitKey = hasMapKitKey)
+    }
 }
 
 @Composable
 private fun AboutScreenContent(hasMapKitKey: Boolean) {
     val context = LocalContext.current
-    val officeLat = 55.0302
-    val officeLon = 82.9204
+    val officeLat = 55.3546
+    val officeLon = 86.0894
     Column(
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         Text(
-            "BuhloSoft Analytics - выдуманная студия, где графики важнее легенд, а маскот всегда просит не забывать воду.",
+            "BuhloSoft Analytics - учебная студия графиков, напитков и очень ответственного маскота.",
             color = BuhloMuted
         )
         OfficeMapCard(hasMapKitKey = hasMapKitKey)
@@ -748,13 +1416,15 @@ private fun AboutScreenContent(hasMapKitKey: Boolean) {
         ) {
             Icon(Icons.Default.Place, contentDescription = null)
             Spacer(Modifier.width(8.dp))
-            Text("Маршрут до офиса")
+            Text("Маршрут до КемГУ")
         }
     }
 }
 
 @Composable
 private fun OfficeMapCard(hasMapKitKey: Boolean) {
+    val context = LocalContext.current
+    val isVpnActive = remember(context) { context.isVpnActive() }
     Card(
         colors = CardDefaults.cardColors(containerColor = BuhloSurface),
         shape = RoundedCornerShape(8.dp)
@@ -763,18 +1433,25 @@ private fun OfficeMapCard(hasMapKitKey: Boolean) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Default.Map, contentDescription = null, tint = BuhloAmber)
                 Spacer(Modifier.width(8.dp))
-                Text("Офис: Новосибирск, Красный проспект, 1", color = BuhloText)
+                Text("Кемеровский государственный университет", color = BuhloText)
             }
             if (hasMapKitKey) {
                 YandexOfficeMap()
             } else {
                 PixelMapPreview(hasMapKitKey = false)
             }
+            if (isVpnActive) {
+                Text(
+                    text = "Возможно вы используете VPN сервис, карта может не работать",
+                    color = BuhloAmber,
+                    fontSize = 13.sp
+                )
+            }
             Text(
                 text = if (hasMapKitKey) {
-                    "Ключ MapKit найден. Это настоящая карта с маркером офиса."
+                    "Карта открыта на КемГУ."
                 } else {
-                    "Для настоящей карты нужен YANDEX_MAPKIT_API_KEY. Сейчас показано пиксельное превью."
+                    "Показываем схематичное превью. Маршрут все равно можно открыть кнопкой выше."
                 },
                 color = BuhloMuted,
                 fontSize = 13.sp
@@ -783,9 +1460,17 @@ private fun OfficeMapCard(hasMapKitKey: Boolean) {
     }
 }
 
+private fun Context.isVpnActive(): Boolean {
+    val connectivityManager = getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+        ?: return false
+    val activeNetwork = connectivityManager.activeNetwork ?: return false
+    val capabilities = connectivityManager.getNetworkCapabilities(activeNetwork) ?: return false
+    return capabilities.hasTransport(NetworkCapabilities.TRANSPORT_VPN)
+}
+
 @Composable
 private fun YandexOfficeMap() {
-    val officePoint = remember { Point(55.0302, 82.9204) }
+    val officePoint = remember { Point(55.3546, 86.0894) }
     var mapView by remember { mutableStateOf<MapView?>(null) }
 
     DisposableEffect(Unit) {
@@ -807,6 +1492,13 @@ private fun YandexOfficeMap() {
                 onStart()
                 mapWindow.map.move(CameraPosition(officePoint, 15.0f, 0.0f, 0.0f))
                 mapWindow.map.mapObjects.addPlacemark(officePoint)
+            }
+        },
+        update = { view ->
+            runCatching {
+                MapKitFactory.getInstance().onStart()
+                view.onStart()
+                view.mapWindow.map.move(CameraPosition(officePoint, 15.0f, 0.0f, 0.0f))
             }
         }
     )
@@ -856,6 +1548,7 @@ private fun BottomTabs(selected: AppTab, onSelect: (AppTab) -> Unit) {
         AppTab.entries.forEach { tab ->
             val icon = when (tab) {
                 AppTab.Dashboard -> Icons.Default.Home
+                AppTab.Catalog -> Icons.Default.Map
                 AppTab.Friends -> Icons.Default.Group
                 AppTab.Account -> Icons.Default.Person
             }
@@ -872,19 +1565,33 @@ private fun BottomTabs(selected: AppTab, onSelect: (AppTab) -> Unit) {
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 private fun AddDrinkDialog(
+    products: List<AlcoholProduct>,
     onDismiss: () -> Unit,
-    onAdd: (DrinkType, Int, Double, String) -> Unit
+    onAdd: (AlcoholProduct, Int, Double, String) -> Unit
 ) {
-    var selectedType by remember { mutableStateOf(DrinkType.Beer) }
-    var volume by remember { mutableIntStateOf(selectedType.defaultVolumeMl) }
-    var strength by remember { mutableDoubleStateOf(selectedType.defaultStrength) }
+    var query by remember { mutableStateOf("") }
+    var selectedId by remember(products) { mutableStateOf(products.firstOrNull()?.id.orEmpty()) }
+    val filtered = remember(products, query) {
+        val needle = query.trim().lowercase()
+        val activeProducts = products.filter { it.isActive }
+        if (needle.isBlank()) activeProducts else activeProducts.filter {
+            it.name.lowercase().contains(needle) ||
+                it.brand.lowercase().contains(needle)
+        }
+    }
+    val selectedProduct = products.firstOrNull { it.id == selectedId } ?: products.firstOrNull()
     var note by remember { mutableStateOf("") }
 
     AlertDialog(
         onDismissRequest = onDismiss,
         confirmButton = {
             Button(
-                onClick = { onAdd(selectedType, volume, strength, note) },
+                enabled = selectedProduct != null,
+                onClick = {
+                    selectedProduct?.let {
+                        onAdd(it, it.volumeMl.coerceAtLeast(1), it.strengthPercent.coerceIn(0.0, 96.0), note)
+                    }
+                },
                 colors = ButtonDefaults.buttonColors(containerColor = BuhloAmber)
             ) {
                 Text("Записать")
@@ -898,42 +1605,305 @@ private fun AddDrinkDialog(
         title = { Text("Добавить запись") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                OutlinedTextField(
+                    value = query,
+                    onValueChange = { query = it },
+                    label = { Text("Найти напиток") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                LazyColumn(
+                    modifier = Modifier.height(220.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    DrinkType.entries.forEach { type ->
-                        FilterChip(
-                            selected = selectedType == type,
-                            onClick = {
-                                selectedType = type
-                                volume = type.defaultVolumeMl
-                                strength = type.defaultStrength
-                            },
-                            label = { Text(type.title) }
+                    items(filtered) { product ->
+                        ProductCard(
+                            product = product,
+                            modifier = Modifier
+                                .border(
+                                    width = if (selectedProduct?.id == product.id) 2.dp else 0.dp,
+                                    color = if (selectedProduct?.id == product.id) BuhloAmber else Color.Transparent,
+                                    shape = RoundedCornerShape(8.dp)
+                                )
+                                .clickable { selectedId = product.id }
                         )
                     }
                 }
-                Text("Объем: $volume мл")
-                Slider(
-                    value = volume.toFloat(),
-                    onValueChange = { volume = it.roundToInt() },
-                    valueRange = 50f..1000f,
-                    steps = 18
-                )
-                Text("Крепость: ${strength.roundToInt()}%")
-                Slider(
-                    value = strength.toFloat(),
-                    onValueChange = { strength = it.toDouble() },
-                    valueRange = 0f..60f,
-                    steps = 11
-                )
+                if (filtered.isEmpty()) {
+                    Text("Напиток не найден в каталоге.", color = BuhloMuted)
+                }
+                selectedProduct?.let {
+                    Text(
+                        "Будет записано: ${it.volumeMl} мл, ${it.strengthPercent.roundToInt()}%",
+                        color = BuhloCream
+                    )
+                }
                 OutlinedTextField(
                     value = note,
                     onValueChange = { note = it },
                     label = { Text("Комментарий") },
                     maxLines = 2
                 )
+            }
+        },
+        containerColor = BuhloSurface,
+        titleContentColor = BuhloText,
+        textContentColor = BuhloText
+    )
+}
+
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@Composable
+private fun AdminProductDialog(
+    isAdmin: Boolean,
+    initialProduct: AlcoholProduct? = null,
+    title: String = "Новый напиток",
+    onDismiss: () -> Unit,
+    onSave: (String, String, String, AlcoholCategory, Int, Double, String, List<String>) -> Unit
+) {
+    var name by remember(initialProduct) { mutableStateOf(initialProduct?.name.orEmpty()) }
+    var brand by remember(initialProduct) { mutableStateOf(initialProduct?.brand.orEmpty()) }
+    var description by remember(initialProduct) { mutableStateOf(initialProduct?.description.orEmpty()) }
+    var category by remember(initialProduct) { mutableStateOf(initialProduct?.category ?: AlcoholCategory.Beer) }
+    var volume by remember(initialProduct) { mutableStateOf((initialProduct?.volumeMl ?: 500).toString()) }
+    var strength by remember(initialProduct) { mutableStateOf((initialProduct?.strengthPercent ?: 5.0).toString()) }
+    var imageUrl by remember(initialProduct) { mutableStateOf(initialProduct?.imageUrl.orEmpty()) }
+    var selectedTags by remember(initialProduct) {
+        mutableStateOf(initialProduct?.tags?.ifEmpty { ProductTag.defaultFor(initialProduct.category) } ?: listOf(ProductTag.Beer.title))
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {
+            Button(
+                onClick = {
+                    onSave(
+                        name,
+                        brand,
+                        description,
+                        category,
+                        volume.toIntOrNull() ?: 500,
+                        strength.replace(',', '.').toDoubleOrNull() ?: 0.0,
+                        imageUrl,
+                        selectedTags
+                    )
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = BuhloAmber)
+            ) {
+                Text("Сохранить")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Отмена")
+            }
+        },
+        title = { Text(title) },
+        text = {
+            LazyColumn(
+                modifier = Modifier.height(520.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                item {
+                    Text(
+                        if (isAdmin) "После сохранения напиток появится в ассортименте." else "Напиток отправится на модерацию.",
+                        color = BuhloMuted,
+                        fontSize = 13.sp
+                    )
+                }
+                item {
+                    OutlinedTextField(
+                        value = name,
+                        onValueChange = { name = it },
+                        label = { Text("Название") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+                item {
+                    OutlinedTextField(
+                        value = brand,
+                        onValueChange = { brand = it },
+                        label = { Text("Бренд") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+                item {
+                    OutlinedTextField(
+                        value = description,
+                        onValueChange = { description = it },
+                        label = { Text("Описание") },
+                        modifier = Modifier.fillMaxWidth(),
+                        maxLines = 3
+                    )
+                }
+                item {
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        AlcoholCategory.entries.forEach { item ->
+                            FilterChip(
+                                selected = category == item,
+                                onClick = {
+                                    category = item
+                                    selectedTags = ProductTag.defaultFor(item)
+                                },
+                                label = { Text(item.title) }
+                            )
+                        }
+                    }
+                }
+                item {
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        OutlinedTextField(
+                            value = volume,
+                            onValueChange = { volume = it.filter(Char::isDigit) },
+                            label = { Text("Мл") },
+                            singleLine = true,
+                            modifier = Modifier.weight(1f)
+                        )
+                        OutlinedTextField(
+                            value = strength,
+                            onValueChange = { strength = it.filter { char -> char.isDigit() || char == '.' || char == ',' } },
+                            label = { Text("%") },
+                            singleLine = true,
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                }
+                item {
+                    Text("Теги", color = BuhloMuted, fontSize = 13.sp)
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        ProductTag.entries.forEach { tag ->
+                            FilterChip(
+                                selected = tag.title in selectedTags,
+                                onClick = {
+                                    selectedTags = if (tag.title in selectedTags) {
+                                        selectedTags - tag.title
+                                    } else {
+                                        selectedTags + tag.title
+                                    }
+                                },
+                                label = { Text(tag.title) }
+                            )
+                        }
+                    }
+                }
+                item {
+                    OutlinedTextField(
+                        value = imageUrl,
+                        onValueChange = { imageUrl = it },
+                        label = { Text("URL картинки") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            }
+        },
+        containerColor = BuhloSurface,
+        titleContentColor = BuhloText,
+        textContentColor = BuhloText
+    )
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun CalendarDialog(
+    calendar: CalendarUiState,
+    onSelectDay: (String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Закрыть")
+            }
+        },
+        title = { Text(calendar.ownerName) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    calendar.monthDays.forEach { day ->
+                        val selected = day.dayKey == calendar.selectedDayKey
+                        Box(
+                            modifier = Modifier
+                                .size(40.dp)
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(
+                                    when {
+                                        selected -> BuhloAmber
+                                        day.hasEntries -> BuhloSurfaceAlt
+                                        else -> Color(0xFF0F0D0B)
+                                    }
+                                )
+                                .border(
+                                    1.dp,
+                                    if (day.hasEntries) BuhloAmber else BuhloSurfaceAlt,
+                                    RoundedCornerShape(6.dp)
+                                )
+                                .clickable { onSelectDay(day.dayKey) },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                day.dayOfMonth.toString(),
+                                color = if (selected) Color(0xFF211100) else BuhloText,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
+                val stats = calendar.selectedDayStats
+                if (stats == null) {
+                    Text("В этот день записей нет.", color = BuhloMuted)
+                } else {
+                    Text(
+                        "${stats.moodFace} ${stats.moodTitle}",
+                        color = BuhloText,
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        "${stats.totalVolumeMl} мл всего, ${stats.totalPureAlcoholMl.roundToInt()} мл чистого спирта",
+                        color = BuhloMuted
+                    )
+                    calendar.selectedDayEntries.forEach { entry ->
+                        Card(
+                            colors = CardDefaults.cardColors(containerColor = BuhloSurfaceAlt),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Row(
+                                Modifier.padding(10.dp),
+                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                if (entry.imageUrl.isNotBlank()) {
+                                    AsyncImage(
+                                        model = entry.imageUrl,
+                                        contentDescription = null,
+                                        modifier = Modifier
+                                            .size(42.dp)
+                                            .clip(RoundedCornerShape(6.dp))
+                                    )
+                                }
+                                Column(Modifier.weight(1f)) {
+                                    Text(entry.productName, color = BuhloText, fontWeight = FontWeight.Bold)
+                                    Text(
+                                        "${entry.volumeMl} мл • ${entry.strengthPercent.roundToInt()}%",
+                                        color = BuhloMuted,
+                                        fontSize = 13.sp
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
             }
         },
         containerColor = BuhloSurface,

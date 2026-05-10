@@ -4,9 +4,12 @@ import android.content.Context
 import android.content.SharedPreferences
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
+import com.example.buhlograf.BuildConfig
 import com.example.buhlograf.domain.AuthProvider
 import com.example.buhlograf.domain.AuthService
+import com.example.buhlograf.domain.PublicIdGenerator
 import com.example.buhlograf.domain.UserSession
+import com.google.firebase.auth.FirebaseAuth
 
 class SecureAuthService(context: Context) : AuthService {
     private val preferences: SharedPreferences = createSecurePreferences(context)
@@ -18,6 +21,8 @@ class SecureAuthService(context: Context) : AuthService {
             ?.let { runCatching { AuthProvider.valueOf(it) }.getOrNull() }
             ?: return null
         val userId = preferences.getString(KEY_USER_ID, null) ?: return null
+        val publicId = preferences.getString(KEY_PUBLIC_ID, null)
+            ?: PublicIdGenerator.fromUserId(userId)
         val photoUrl = preferences.getString(KEY_PHOTO_URL, null)
         val email = preferences.getString(KEY_EMAIL, null)
 
@@ -26,6 +31,7 @@ class SecureAuthService(context: Context) : AuthService {
             userName = userName,
             provider = provider,
             userId = userId,
+            publicId = publicId,
             photoUrl = photoUrl,
             email = email
         )
@@ -37,12 +43,18 @@ class SecureAuthService(context: Context) : AuthService {
             .putString(KEY_USER_NAME, session.userName)
             .putString(KEY_PROVIDER, session.provider.name)
             .putString(KEY_USER_ID, session.userId)
+            .putString(KEY_PUBLIC_ID, session.publicId)
             .putString(KEY_PHOTO_URL, session.photoUrl)
             .putString(KEY_EMAIL, session.email)
             .apply()
     }
 
     override fun clearSession() {
+        val provider = preferences.getString(KEY_PROVIDER, null)
+            ?.let { runCatching { AuthProvider.valueOf(it) }.getOrNull() }
+        if (BuildConfig.HAS_GOOGLE_SERVICES_JSON && provider == AuthProvider.Google) {
+            FirebaseAuth.getInstance().signOut()
+        }
         preferences.edit().clear().apply()
     }
 
@@ -51,7 +63,8 @@ class SecureAuthService(context: Context) : AuthService {
             token = "demo-token",
             userName = "Демо Выпивоха",
             provider = AuthProvider.Demo,
-            userId = "DEMO-00000001"
+            userId = "DEMO-00000001",
+            publicId = "DEMO01"
         )
 
     private fun createSecurePreferences(context: Context): SharedPreferences {
@@ -74,6 +87,7 @@ class SecureAuthService(context: Context) : AuthService {
         const val KEY_USER_NAME = "user_name"
         const val KEY_PROVIDER = "provider"
         const val KEY_USER_ID = "user_id"
+        const val KEY_PUBLIC_ID = "public_id"
         const val KEY_PHOTO_URL = "photo_url"
         const val KEY_EMAIL = "email"
     }

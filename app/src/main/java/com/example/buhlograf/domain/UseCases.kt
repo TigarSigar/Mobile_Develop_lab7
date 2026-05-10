@@ -5,9 +5,17 @@ class CalculateMascotMoodUseCase {
         val totalPureAlcohol = entries.sumOf { it.pureAlcoholMl }
         return when {
             entries.isEmpty() -> MascotMood.Empty
-            totalPureAlcohol >= 90.0 -> MascotMood.Warning
+            totalPureAlcohol >= 140.0 -> MascotMood.Aftermath
+            totalPureAlcohol >= 115.0 -> MascotMood.Warning
+            totalPureAlcohol >= 95.0 -> MascotMood.Critical
+            totalPureAlcohol >= 80.0 -> MascotMood.Risky
+            totalPureAlcohol >= 65.0 -> MascotMood.Questionable
+            totalPureAlcohol >= 50.0 -> MascotMood.Loud
             totalPureAlcohol >= 35.0 -> MascotMood.Party
-            else -> MascotMood.Calm
+            totalPureAlcohol >= 25.0 -> MascotMood.Alive
+            totalPureAlcohol >= 15.0 -> MascotMood.Calm
+            totalPureAlcohol >= 5.0 -> MascotMood.AlmostAcademic
+            else -> MascotMood.Tiny
         }
     }
 }

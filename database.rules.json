@@ -1,0 +1,10 @@
+{
+  "rules": {
+    "product_suggestions": {
+      ".read": "auth != null",
+      "$suggestionId": {
+        ".write": "auth != null"
+      }
+    }
+  }
+}

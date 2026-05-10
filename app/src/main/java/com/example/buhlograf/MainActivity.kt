@@ -54,6 +54,8 @@ class MainActivity : ComponentActivity() {
                         authService = app.authService,
                         drinkRepository = app.drinkRepository,
                         friendsRepository = app.friendsRepository,
+                        catalogRepository = app.catalogRepository,
+                        dailyStatsRepository = app.dailyStatsRepository,
                         cloudSyncService = app.cloudSyncService,
                         remoteConfigService = app.remoteConfigService,
                         buildDashboard = app.buildDashboardUseCase,
@@ -150,39 +152,7 @@ class MainActivity : ComponentActivity() {
                         }
                     },
                     onVkLoginClick = {
-                        if (!app.hasVkKeys) {
-                            viewModel.onVkLoginError("Нужны VK_APP_ID и VK_CLIENT_SECRET в local.properties.")
-                        } else {
-                            VKID.instance.authorize(
-                                lifecycleOwner = this@MainActivity,
-                                callback = object : VKIDAuthCallback {
-                                    override fun onAuth(accessToken: AccessToken) {
-                                        val user = accessToken.userData
-                                        val userName = listOfNotNull(
-                                            user?.firstName,
-                                            user?.lastName
-                                        ).joinToString(" ").ifBlank { "Пользователь VK" }
-                                        ensureFirebaseUid { uid ->
-                                            viewModel.onVkLoginSuccess(
-                                                token = accessToken.token,
-                                                userName = userName,
-                                                photoUrl = user?.photo200 ?: user?.photo100 ?: user?.photo50,
-                                                firebaseUid = uid
-                                            )
-                                        }
-                                    }
-
-                                    override fun onAuthCode(
-                                        data: AuthCodeData,
-                                        isCompletion: Boolean
-                                    ) = Unit
-
-                                    override fun onFail(fail: VKIDAuthFail) {
-                                        viewModel.onVkLoginError(fail.description)
-                                    }
-                                }
-                            )
-                        }
+                        viewModel.showVkMeme()
                     },
                     onGoogleLoginClick = {
                         googleLoginLauncher.launch(googleSignInClient.signInIntent)
@@ -235,9 +205,13 @@ class MainActivity : ComponentActivity() {
             return
         }
         val auth = FirebaseAuth.getInstance()
-        auth.currentUser?.uid?.let {
-            onReady(it)
+        val currentUser = auth.currentUser
+        if (currentUser?.isAnonymous == true) {
+            onReady(currentUser.uid)
             return
+        }
+        if (currentUser != null) {
+            auth.signOut()
         }
         auth.signInAnonymously()
             .addOnSuccessListener { onReady(it.user?.uid) }

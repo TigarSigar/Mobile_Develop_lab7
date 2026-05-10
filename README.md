@@ -1,36 +1,36 @@
 <div align="center">
 
-# МИНИСТЕРСТВО НАУКИ И ВЫСШЕГО ОБРАЗОВАНИЯ  
+# МИНИСТЕРСТВО НАУКИ И ВЫСШЕГО ОБРАЗОВАНИЯ
 # РОССИЙСКОЙ ФЕДЕРАЦИИ
 
-## ФЕДЕРАЛЬНОЕ ГОСУДАРСТВЕННОЕ БЮДЖЕТНОЕ  
-## ОБРАЗОВАТЕЛЬНОЕ УЧРЕЖДЕНИЕ  
-## ВЫСШЕГО ОБРАЗОВАНИЯ  
+## ФЕДЕРАЛЬНОЕ ГОСУДАРСТВЕННОЕ БЮДЖЕТНОЕ
+## ОБРАЗОВАТЕЛЬНОЕ УЧРЕЖДЕНИЕ
+## ВЫСШЕГО ОБРАЗОВАНИЯ
 ## «КЕМЕРОВСКИЙ ГОСУДАРСТВЕННЫЙ УНИВЕРСИТЕТ»
 
 ### Институт цифры
 
 <br><br>
 
-# ОТЧЁТ  
-# О ВЫПОЛНЕНИИ ЛАБОРАТОРНОЙ РАБОТЫ №6
+# ОТЧЁТ
+# О ВЫПОЛНЕНИИ ЛАБОРАТОРНОЙ РАБОТЫ №7
 
 <br>
 
-### по дисциплине: Разработка мобильных приложений  
-### тема: Сервисы Google, VK, Yandex. Реализация приложения **Бухлограф**
+### по дисциплине: Разработка мобильных приложений
+### тема: Firebase, FCM, Firestore и Realtime Database в приложении **Бухлограф**
 
 <br><br>
 
-**Студент:** 3 курса, группы ФИТ-231  
+**Студент:** 3 курса, группы ФИТ-231
 **Кононенко Егор Сергеевич**
 
-**Направление подготовки:**  
+**Направление подготовки:**
 02.03.02 — Фундаментальная информатика и информационные технологии
 
 <br><br><br>
 
-**Руководитель:**  
+**Руководитель:**
 асс. Киселёв К. Е.
 
 <br><br><br><br>
@@ -41,67 +41,35 @@
 
 ---
 
-# Лабораторная работа №6  
-## Сервисы Google, VK, Yandex. Реализация приложения «Бухлограф»
+# Лабораторная работа №7
+## Firebase, FCM, Firestore и Realtime Database в приложении «Бухлограф»
 
 ## Цель работы
 
-Научиться подключать сторонние сервисы к Android-приложению, использовать внешние SDK и при этом не связывать пользовательский интерфейс напрямую с конкретными поставщиками сервисов.
+Цель лабораторной работы — подключить Firebase к Android-приложению и реализовать облачное хранение данных, синхронизацию пользовательских профилей, систему друзей, push-инфраструктуру и администрируемый каталог данных.
 
 В рамках работы были изучены и применены:
 
-- AppMetrica для аналитики;
-- Yandex ID для авторизации;
-- VK ID SDK как дополнительный провайдер авторизации;
-- Google Sign-In как дополнительный вход через Google-аккаунт;
-- Yandex MapKit для отображения карты;
-- `EncryptedSharedPreferences` для безопасного хранения токенов;
-- фасады `AnalyticsService` и `AuthService`, скрывающие внешние SDK от ViewModel.
+- Firebase Authentication;
+- Cloud Firestore;
+- Firebase Realtime Database;
+- Firebase Cloud Messaging;
+- Firebase Remote Config;
+- Google Sign-In через Firebase Auth;
+- хранение пользовательских профилей и публичных ID;
+- система заявок в друзья;
+- каталог напитков с модерацией;
+- разграничение обычного и админского аккаунта через поле `isAdmin`.
 
 ---
 
-## Краткая теоретическая часть
+## Описание приложения
 
-В Android-разработке внешние сервисы используются для задач, которые сложно или невыгодно реализовывать самостоятельно: авторизация, аналитика, карты, push-уведомления, платежи и другие инфраструктурные функции.
+**Бухлограф** — это мемный дневник напитков с графиками, друзьями, календарём активности и пиксельным маскотом.
 
-При прямом использовании SDK во ViewModel или UI приложение получает сильную связность: бизнес-логика начинает зависеть от конкретной библиотеки. Чтобы избежать этого, используется подход фасадов и интерфейсов. В данной работе SDK AppMetrica, Yandex ID и VK ID вынесены за собственные сервисы и обработчики, а ViewModel работает с внутренними моделями приложения.
+Пользователь отмечает, что он выпил за день, выбирая напиток из общего ассортимента. Приложение считает объём чистого спирта, сохраняет записи по датам и меняет настроение маскота. Чем больше данных накоплено, тем нагляднее становится личный график и прогресс друзей.
 
----
-
-## Постановка задания
-
-По заданию лабораторной работы требовалось:
-
-- подключить AppMetrica;
-- хранить API-ключи в `local.properties` и передавать их через `BuildConfig`;
-- инициализировать SDK в классе `Application`;
-- создать `AnalyticsService`;
-- реализовать `AppMetricaAnalyticsService` и `FakeAnalyticsService`;
-- написать unit-тесты ViewModel на события аналитики;
-- добавить авторизацию через Yandex ID и VK ID;
-- скрыть SDK авторизации за внутренней логикой приложения;
-- сохранять токен и данные пользователя в `EncryptedSharedPreferences`;
-- логировать событие `user_logged_in` с параметром `provider`;
-- добавить экран «О нас» с картой и маршрутом до офиса.
-
-В качестве практической реализации было создано приложение **«Бухлограф»**.
-
----
-
-## Описание приложения «Бухлограф»
-
-**Бухлограф** — это мемный дневник напитков с графиками, друзьями и пиксельным маскотом.
-
-Пользователь отмечает, что и сколько он выпил за день: тип напитка, объём, крепость и комментарий. На основе записей приложение считает общий объём, условный объём чистого спирта и меняет настроение маскота.
-
-Состояния маскота:
-
-- пустой дневник — маскот грустит, потому что графику нечего рисовать;
-- умеренная запись — культурный режим;
-- активный вечер — маскот оживает;
-- перебор — включается режим совести с предупреждением.
-
-Приложение не поощряет чрезмерное употребление, а работает как сатирический дневник и демонстрация интеграции сторонних сервисов.
+Приложение не является рекомендацией к употреблению алкоголя. Это учебный проект, в котором сатирический интерфейс используется как оболочка для демонстрации Firebase, авторизации, облачного каталога и социальной механики.
 
 ---
 
@@ -109,393 +77,468 @@
 
 - **Kotlin** — основной язык разработки;
 - **Jetpack Compose** — пользовательский интерфейс;
-- **AppMetrica SDK** — аналитика событий;
-- **Yandex ID LoginSDK** — авторизация через Яндекс;
-- **VK ID SDK** — авторизация через VK;
-- **Google Play Services Auth** — вход через Google;
+- **Firebase Auth** — авторизация и связка с Google Sign-In;
+- **Cloud Firestore** — основная база профилей, записей, друзей и каталога;
+- **Realtime Database** — мгновенная очередь пользовательских заявок на добавление напитков;
+- **Firebase Cloud Messaging** — получение и хранение FCM-токена;
+- **Firebase Remote Config** — удалённые параметры приложения;
+- **Yandex ID** — авторизация через Яндекс;
+- **VK ID SDK** — интеграция входа через VK ID;
 - **Yandex MapKit** — карта на экране «О нас»;
-- **EncryptedSharedPreferences** — безопасное хранение токенов;
-- **JUnit** — unit-тесты ViewModel.
+- **AppMetrica** — аналитика событий;
+- **EncryptedSharedPreferences** — безопасное хранение локальной сессии.
 
 ---
 
 # Реализация лабораторной работы
 
-## 1. Инициализация SDK в Application
+## 1. Подключение Firebase
 
-В проекте создан собственный класс `BuhlografApplication`, который зарегистрирован в `AndroidManifest.xml`.
-
-В нём выполняется инициализация внешних сервисов:
-
-- AppMetrica;
-- Yandex MapKit;
-- VK ID;
-- локальных репозиториев;
-- сервисов авторизации и аналитики.
-
-```kotlin
-class BuhlografApplication : Application() {
-    override fun onCreate() {
-        super.onCreate()
-        initializeAppMetrica()
-        initializeMapKit()
-        initializeVkId()
-
-        analyticsService = AppMetricaAnalyticsService(
-            enabled = BuildConfig.APPMETRICA_API_KEY.isNotBlank()
-        )
-        authService = SecureAuthService(this)
-    }
-}
-```
-
-Это соответствует требованию лабораторной: SDK не инициализируются в Activity, а запускаются на уровне приложения.
-
----
-
-## 2. Хранение ключей через local.properties
-
-Ключи не внесены напрямую в исходный код. Они читаются из `local.properties` и передаются в приложение через `BuildConfig`.
-
-```kotlin
-buildConfigField("String", "YANDEX_CLIENT_ID", buildConfigString(yandexClientId))
-buildConfigField("String", "APPMETRICA_API_KEY", buildConfigString(localValue("APPMETRICA_API_KEY")))
-buildConfigField("String", "YANDEX_MAPKIT_API_KEY", buildConfigString(localValue("YANDEX_MAPKIT_API_KEY")))
-buildConfigField("String", "VK_APP_ID", buildConfigString(vkAppId))
-buildConfigField("String", "VK_CLIENT_SECRET", buildConfigString(vkClientSecret))
-```
-
-Файл `local.properties` находится в `.gitignore`, поэтому секреты не публикуются в репозиторий.
-
----
-
-## 3. Аналитика через AppMetrica
-
-Для аналитики создан интерфейс:
-
-```kotlin
-interface AnalyticsService {
-    fun trackEvent(name: String, params: Map<String, Any> = emptyMap())
-    fun trackError(message: String, error: Throwable? = null)
-}
-```
-
-Реальная реализация скрывает работу с SDK AppMetrica:
-
-```kotlin
-class AppMetricaAnalyticsService(
-    private val enabled: Boolean
-) : AnalyticsService {
-    override fun trackEvent(name: String, params: Map<String, Any>) {
-        if (enabled) {
-            AppMetrica.reportEvent(name, params)
-        } else {
-            Log.d("BuhlografAnalytics", "event=$name params=$params")
-        }
-    }
-}
-```
-
-Если ключ AppMetrica отсутствует, события выводятся в Logcat. Это позволяет тестировать приложение без падений.
-
----
-
-## 4. FakeAnalyticsService и unit-тесты
-
-Для тестирования ViewModel создан `FakeAnalyticsService`.
-
-```kotlin
-class FakeAnalyticsService : AnalyticsService {
-    val events = mutableListOf<Pair<String, Map<String, Any>>>()
-
-    override fun trackEvent(name: String, params: Map<String, Any>) {
-        events += name to params
-    }
-}
-```
-
-Unit-тесты проверяют:
-
-- событие `drink_added` при добавлении записи;
-- событие `screen_viewed` при открытии вкладки друзей;
-- событие `user_logged_in` при входе в демо-режим.
-
-```kotlin
-assertTrue(
-    fixture.analytics.events.any { (name, params) ->
-        name == "drink_added" &&
-            params["type"] == "beer" &&
-            params["volume_ml"] == 500
-    }
-)
-```
-
----
-
-## 5. Авторизация через Yandex ID
-
-Для Yandex ID подключен официальный LoginSDK:
-
-```kotlin
-implementation("com.yandex.android:authsdk:3.1.3")
-```
-
-В `MainActivity` создаётся SDK и launcher:
-
-```kotlin
-val yandexSdk = YandexAuthSdk.create(YandexAuthOptions(this))
-
-val yandexLoginLauncher = rememberLauncherForActivityResult(sdk.contract) { result ->
-    when (result) {
-        is YandexAuthResult.Success -> viewModel.onYandexLoginSuccess(...)
-        is YandexAuthResult.Failure -> viewModel.onYandexLoginError(...)
-        YandexAuthResult.Cancelled -> viewModel.onYandexLoginError(...)
-    }
-}
-```
-
-После успешного входа создаётся внутренняя модель `UserSession`, а ViewModel не зависит от классов SDK.
-
----
-
-## 6. Авторизация через VK ID
-
-В проект подключен VK ID SDK:
-
-```kotlin
-implementation("com.vk.id:vkid:2.6.0")
-```
-
-Также добавлены репозитории VK SDK в `settings.gradle.kts`.
-
-В приложении есть отдельная кнопка «Войти через VK ID». При нажатии вызывается:
-
-```kotlin
-VKID.instance.authorize(
-    lifecycleOwner = this,
-    callback = object : VKIDAuthCallback {
-        override fun onAuth(accessToken: AccessToken) {
-            viewModel.onVkLoginSuccess(...)
-        }
-
-        override fun onFail(fail: VKIDAuthFail) {
-            viewModel.onVkLoginError(fail.description)
-        }
-    }
-)
-```
-
-Примечание по тестированию: в учебной среде VK ID вход может завершаться ошибкой на стороне VK ID/кабинета разработчика. Аналогичная проблема наблюдалась у других студентов. При этом интеграция SDK, ключи, manifest placeholders и обработка результата в коде реализованы.
-
----
-
-## 7. Вход через Google
-
-Дополнительно добавлен вход через Google-аккаунт:
-
-```kotlin
-implementation("com.google.android.gms:play-services-auth:21.4.0")
-```
-
-Google Sign-In используется как третий провайдер авторизации:
-
-```kotlin
-GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
-    .requestEmail()
-    .requestProfile()
-    .build()
-```
-
-После успешного входа пользователь также сохраняется в общей модели `UserSession`, а событие отправляется в AppMetrica с параметром:
+В проект добавлен файл конфигурации:
 
 ```text
-provider = google
+app/google-services.json
 ```
 
----
-
-## 8. Безопасное хранение токена
-
-Токен, имя пользователя, провайдер и ID пользователя сохраняются через `EncryptedSharedPreferences`.
+В корневом `build.gradle.kts` подключен плагин Google Services:
 
 ```kotlin
-EncryptedSharedPreferences.create(
-    context,
-    "secure_session",
-    masterKey,
-    EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-    EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
-)
+id("com.google.gms.google-services") version "4.4.4" apply false
 ```
 
-Токены не сохраняются в обычный `SharedPreferences`, не передаются через Intent и не выводятся в Logcat.
-
----
-
-## 9. Вкладка аккаунта
-
-В приложении реализована вкладка **«Аккаунт»**. Она показывает:
-
-- имя пользователя;
-- провайдера входа;
-- ID пользователя;
-- признак наличия фото профиля;
-- кнопку выхода.
-
-ID пользователя нужен для будущей системы друзей через Firebase.
+В модуле приложения подключены Firebase BoM и нужные SDK:
 
 ```kotlin
-data class UserSession(
-    val token: String,
-    val userName: String,
-    val provider: AuthProvider,
-    val userId: String,
-    val photoUrl: String? = null
-)
+implementation(platform("com.google.firebase:firebase-bom:34.12.0"))
+implementation("com.google.firebase:firebase-auth")
+implementation("com.google.firebase:firebase-firestore")
+implementation("com.google.firebase:firebase-database")
+implementation("com.google.firebase:firebase-messaging")
+implementation("com.google.firebase:firebase-analytics")
+implementation("com.google.firebase:firebase-config")
+```
+
+Firebase инициализируется в `BuhlografApplication`. Если конфигурация Firebase отсутствует, приложение остаётся работоспособным на локальных репозиториях.
+
+---
+
+## 2. Авторизация и профиль пользователя
+
+В приложении реализованы несколько провайдеров входа:
+
+- Google;
+- Yandex ID;
+- VK ID;
+- демо-режим.
+
+Google-аккаунт подключается через Firebase Auth, поэтому пользователь получает стабильный Firebase UID. Для Яндекса добавлена проверка по email: если пользователь уже существует в Firestore, приложение переиспользует найденный профиль и публичный ID, а не создаёт дубликат.
+
+Профиль хранится в коллекции:
+
+```text
+users/{userId}
+```
+
+Основные поля профиля:
+
+```text
+userId: string
+publicId: string
+name: string
+email: string
+provider: string
+photoUrl: string
+fcmToken: string
+isAdmin: boolean
+updatedAtMillis: number
+```
+
+Поле `isAdmin` по умолчанию создаётся как `false`. Для выдачи прав администратора достаточно изменить его на `true` в Firebase Console.
+
+---
+
+## 3. Публичный ID пользователя
+
+Для добавления друзей используется короткий публичный ID из шести символов:
+
+```text
+NSZUQ1
+```
+
+ID состоит из заглавных английских букв и цифр. Он хранится в профиле пользователя и отображается:
+
+- обычным текстом во вкладке «Аккаунт»;
+- в виде отдельных квадратных символов во вкладке «Друзья».
+
+По нажатию ID копируется в буфер обмена.
+
+Также исправлена проблема, при которой ID мог перезаписываться при повторном входе. Теперь приложение сначала читает существующий `publicId` из Firestore и только при его отсутствии создаёт новый.
+
+---
+
+## 4. Публичные профили
+
+Для поиска друзей используется отдельная коллекция:
+
+```text
+public_profiles/{publicId}
+```
+
+Она нужна, чтобы пользователь мог найти друга по короткому ID, не зная внутренний `userId`.
+
+Документ публичного профиля содержит:
+
+```text
+publicId: string
+userId: string
+name: string
+email: string
+provider: string
+photoUrl: string
+moodFace: string
+moodTitle: string
+pureAlcoholMl: number
+updatedAtMillis: number
+```
+
+Так друзья видят не только имя, но и текущий статус, маскота и дневной прогресс.
+
+---
+
+## 5. Система друзей
+
+Во вкладке «Друзья» реализована полноценная заявочная механика.
+
+Пользователь может:
+
+- скопировать свой ID;
+- ввести ID другого пользователя;
+- отправить заявку;
+- принять входящую заявку;
+- отклонить заявку;
+- удалить друга.
+
+Заявка не добавляет друга автоматически. Дружба появляется только после подтверждения второй стороной.
+
+Данные друзей хранятся в подколлекции:
+
+```text
+users/{userId}/friends/{friendUserId}
+```
+
+У записи дружбы есть статусы:
+
+```text
+outgoing
+incoming
+accepted
+rejected
+```
+
+Также добавлена проверка, запрещающая отправлять заявку самому себе.
+
+---
+
+## 6. Календарь активности
+
+В профиле пользователя и при открытии карточки друга доступен календарь.
+
+Пользователь выбирает день, после чего приложение показывает:
+
+- список напитков за дату;
+- объём;
+- крепость;
+- рассчитанный объём чистого спирта;
+- комментарий;
+- итог за сутки.
+
+Собственные записи пользователя хранятся в Firestore, а публичная дневная статистика публикуется в профиле, чтобы друзья могли видеть прогресс без доступа к приватным данным.
+
+---
+
+## 7. Каталог напитков
+
+В приложении добавлена вкладка «Ассортимент».
+
+Напитки загружаются из Firestore:
+
+```text
+products/{productId}
+```
+
+У напитка есть поля:
+
+```text
+id: string
+name: string
+description: string
+imageUrl: string
+volumeMl: number
+strengthPercent: number
+tags: array
+createdBy: string
+createdAtMillis: number
+approved: boolean
+```
+
+В добавлении записи больше нет ручных ползунков объёма и крепости. Пользователь выбирает готовый напиток из каталога, а приложение берёт параметры из карточки продукта.
+
+---
+
+## 8. Админка каталога
+
+Если у пользователя в Firestore стоит:
+
+```text
+isAdmin: true
+```
+
+во вкладке аккаунта появляется отметка **«Админский аккаунт»**, а в ассортименте включается админ-режим.
+
+Администратор может:
+
+- добавлять напитки сразу в общий каталог;
+- видеть пользовательские заявки на новые напитки;
+- одобрять заявку;
+- отклонять заявку;
+- перед публикацией изменить название, описание, картинку, объём, крепость и теги;
+- в будущем редактировать и удалять уже опубликованные напитки каталога.
+
+Обычный пользователь тоже может предложить напиток, но его заявка сначала попадает на модерацию.
+
+---
+
+## 9. Realtime Database для заявок
+
+Пользовательские предложения напитков сохраняются в Realtime Database:
+
+```text
+product_suggestions/{suggestionId}
+```
+
+RTDB выбрана для этой части, потому что администратор может сразу увидеть новые заявки без ручного обновления экрана.
+
+Пример структуры заявки:
+
+```text
+id: string
+name: string
+description: string
+imageUrl: string
+volumeMl: number
+strengthPercent: number
+tags: array
+status: string
+createdBy: string
+createdAtMillis: number
+moderatedBy: string
+moderatedAtMillis: number
+```
+
+После одобрения заявка переносится в Firestore-коллекцию `products`.
+
+---
+
+## 10. Firebase Cloud Messaging
+
+В проект добавлен сервис:
+
+```text
+PushMessagingService
+```
+
+Он наследуется от `FirebaseMessagingService` и обрабатывает:
+
+- обновление FCM-токена;
+- входящие push-сообщения;
+- показ локального уведомления через `NotificationCompat`.
+
+FCM-токен сохраняется в профиле пользователя:
+
+```text
+users/{userId}.fcmToken
+```
+
+Это подготавливает приложение к push-уведомлениям о заявках в друзья, одобрении напитков и других событиях.
+
+---
+
+## 11. Remote Config
+
+Для удалённых параметров используется Firebase Remote Config.
+
+В приложении предусмотрены параметры:
+
+```text
+welcome_banner
+experimental_friends_enabled
+```
+
+Это позволяет менять часть поведения приложения без пересборки APK.
+
+---
+
+## 12. Экран загрузки данных
+
+При запуске после авторизации приложение не пускает пользователя сразу в основной интерфейс. Сначала загружаются или достаются из кеша важные данные:
+
+- профиль пользователя;
+- публичный ID;
+- список напитков;
+- права администратора;
+- заявки на модерацию;
+- друзья и входящие заявки.
+
+Это нужно, чтобы интерфейс не открывался в полупустом состоянии и не показывал пользователю исчезающие элементы.
+
+---
+
+## 13. Экран «О нас» и карта
+
+Раздел «О нас» открывается из вкладки аккаунта как отдельный экран поверх профиля.
+
+В нём указана организация:
+
+```text
+Кемеровский государственный университет
+```
+
+Также отображается карта Yandex MapKit. Если у пользователя активен VPN, под картой появляется предупреждение:
+
+```text
+Возможно вы используете VPN сервис, карта может не работать
+```
+
+Это добавлено потому, что карты Яндекса могут не загружаться при некоторых VPN-подключениях.
+
+---
+
+## 14. VK ID
+
+В проекте оставлена интеграция VK ID SDK и конфигурация ключей. При этом из-за нестабильной работы кабинета VK ID и ограничений настройки мобильного приложения в учебной среде вход через VK может завершаться ошибкой.
+
+Для демонстрации обработки нажатия на кнопку VK добавлен отдельный экран с локальной GIF-анимацией и кнопкой возврата. Это не ломает остальные способы входа и позволяет сохранить UX без падений приложения.
+
+---
+
+# Структура Firebase
+
+## Cloud Firestore
+
+```text
+users/{userId}
+users/{userId}/friends/{friendUserId}
+users/{userId}/drinks/{drinkId}
+users/{userId}/daily_stats/{yyyy-MM-dd}
+
+public_profiles/{publicId}
+public_profiles/{publicId}/public_day_entries/{yyyy-MM-dd}
+
+products/{productId}
+```
+
+## Realtime Database
+
+```text
+product_suggestions/{suggestionId}
 ```
 
 ---
 
-## 10. Система друзей
+# Правила Firebase
 
-Вкладка **«Друзья»** больше не содержит заранее заданные мок-профили. Пользователь может добавить друга по ID.
+В репозитории лежат файлы:
 
-Сейчас друзья сохраняются локально в `LocalFriendsRepository`, а в следующей лабораторной этот механизм будет перенесён на Firebase/Firestore.
+```text
+firestore.rules
+database.rules.json
+```
 
-```kotlin
-class LocalFriendsRepository : FriendsRepository {
-    private val friends = mutableListOf<FriendProgress>()
+Их нужно опубликовать в Firebase Console:
 
-    override fun addFriendById(id: String): FriendProgress? {
-        val normalized = id.trim().uppercase()
-        if (normalized.isBlank()) return null
+- Firestore Database → Rules;
+- Realtime Database → Rules.
 
-        val friend = FriendProgress(
-            id = normalized,
-            name = "Друг $normalized",
-            status = "ожидает синхронизацию Firebase",
-            pureAlcoholMl = 0.0,
-            streakDays = 0
-        )
-        friends += friend
-        return friend
-    }
-}
+Для учебной работы правила разрешают авторизованным пользователям читать нужные данные, обычным пользователям отправлять заявки, а администраторам управлять каталогом.
+
+---
+
+# Настройка проекта
+
+## 1. Firebase
+
+Нужно добавить конфигурационный файл:
+
+```text
+app/google-services.json
+```
+
+В текущем проекте файл уже добавлен.
+
+## 2. local.properties
+
+Ключи внешних сервисов хранятся в `local.properties`, который не публикуется в репозиторий:
+
+```properties
+YANDEX_CLIENT_ID=...
+YANDEX_MAPKIT_API_KEY=...
+APPMETRICA_API_KEY=...
+VK_APP_ID=...
+VK_CLIENT_SECRET=...
+```
+
+## 3. Сборка
+
+Debug-сборка:
+
+```bash
+./gradlew.bat :app:assembleDebug
+```
+
+Release-сборка:
+
+```bash
+./gradlew.bat :app:assembleRelease
+```
+
+Готовый release APK:
+
+```text
+app/build/outputs/apk/release/app-release.apk
 ```
 
 ---
 
-## 11. Экран «О нас» и карта
+# Выполненные пункты
 
-Раздел «О нас» перенесён из нижней навигации в маленькую кнопку `i` на вкладке аккаунта.
-
-В разделе отображается:
-
-- информация о выдуманной компании **BuhloSoft Analytics**;
-- карта Yandex MapKit;
-- маркер офиса;
-- кнопка построения маршрута до офиса.
-
-```kotlin
-MapKitFactory.setApiKey(apiKey)
-MapKitFactory.initialize(this)
-```
-
-Маршрут строится через интент Яндекс.Карт:
-
-```kotlin
-val uri = Uri.parse("yandexmaps://maps.yandex.ru/?rtext=~$officeLat,$officeLon&rtt=auto")
-```
-
----
-
-## 12. События аналитики
-
-В AppMetrica логируются следующие события:
-
-- `screen_viewed`;
-- `drink_added`;
-- `day_cleared`;
-- `friend_added`;
-- `limit_warning_shown`;
-- `user_logged_in`.
-
-Для события входа передаётся параметр `provider`:
-
-- `yandex`;
-- `vk`;
-- `google`;
-- `demo`.
+- Firebase подключён к Android-проекту.
+- Google Services plugin настроен.
+- Google Sign-In работает через Firebase Auth.
+- Профили пользователей сохраняются в Firestore.
+- Yandex-профиль не дублируется при повторном входе с тем же email.
+- У пользователя есть короткий публичный ID.
+- ID можно копировать и использовать для добавления друзей.
+- Реализованы заявки в друзья с подтверждением второй стороной.
+- Добавлено удаление из друзей.
+- Добавлен календарь дневной активности.
+- Записи о напитках сохраняются по датам.
+- Друзья видят дневной статус и маскота пользователя.
+- Каталог напитков загружается из Firestore.
+- Обычные пользователи отправляют напитки на модерацию через RTDB.
+- Админ может одобрять и редактировать заявки перед публикацией.
+- В профиле отображается статус админского аккаунта.
+- FCM-токен сохраняется в Firestore.
+- Remote Config подключён.
+- Добавлены правила Firestore и Realtime Database.
+- Добавлено предупреждение о VPN под картой.
+- Сборка release APK выполнена.
 
 ---
 
-# Контрольное задание для самопроверки
+# Итог
 
-## Выполненные пункты
+В ходе лабораторной работы №7 приложение **«Бухлограф»** было расширено полноценной Firebase-инфраструктурой.
 
-### 1. AppMetrica подключена — выполнено
+Теперь данные пользователя, друзья, каталог напитков, дневная статистика и заявки на модерацию хранятся в облаке. Приложение поддерживает админские аккаунты, короткие публичные ID, подтверждение дружбы, загрузку общего каталога и подготовлено к push-уведомлениям через FCM.
 
-SDK подключен, ключ передаётся через `BuildConfig`, инициализация выполняется в `Application`.
-
-### 2. AnalyticsService создан — выполнено
-
-Созданы `AnalyticsService`, `AppMetricaAnalyticsService` и `FakeAnalyticsService`.
-
-### 3. Unit-тесты ViewModel — выполнено
-
-Написаны unit-тесты, проверяющие вызовы аналитики через fake-сервис.
-
-### 4. Yandex ID — выполнено
-
-Добавлен вход через Yandex LoginSDK, обработаны успех, ошибка и отмена.
-
-### 5. VK ID — выполнено частично с технической оговоркой
-
-SDK подключён, кнопка входа, manifest placeholders и callback реализованы. При практическом тестировании вход VK ID может не проходить из-за ограничений/ошибок кабинета VK ID, что совпало с проблемой у других студентов.
-
-### 6. Безопасное хранение токенов — выполнено
-
-Данные сессии хранятся в `EncryptedSharedPreferences`.
-
-### 7. Событие user_logged_in — выполнено
-
-После входа через каждый провайдер отправляется событие `user_logged_in` с параметром `provider`.
-
-### 8. Раздел «О нас» с картой — выполнено
-
-Раздел доступен через кнопку `i`, содержит описание компании, карту и построение маршрута.
-
----
-
-## Подготовка к лабораторной работе №7
-
-В лабораторной работе №7 требуется подключить Firebase и Firebase Cloud Messaging.
-
-В текущем приложении уже подготовлена логика, которую можно будет перенести на Firebase:
-
-- у каждого пользователя есть `userId`;
-- во вкладке друзей есть добавление по ID;
-- локальный `FriendsRepository` можно заменить на Firestore-реализацию;
-- в дальнейшем можно хранить друзей в коллекции `users/{userId}/friends`;
-- Firebase также можно использовать для push-уведомлений о добавлении друга.
-
----
-
-## Итог
-
-В ходе лабораторной работы было разработано приложение **«Бухлограф»**, демонстрирующее подключение сторонних сервисов в Android.
-
-В приложении реализованы:
-
-- авторизация через Yandex ID;
-- интеграция VK ID SDK;
-- вход через Google;
-- аналитика через AppMetrica;
-- безопасное хранение пользовательской сессии;
-- карта Yandex MapKit;
-- вкладка аккаунта;
-- система добавления друзей по ID;
-- unit-тесты для проверки событий аналитики.
-
-Работа показала, что внешние SDK лучше подключать через фасады и внутренние модели приложения. Такой подход уменьшает связанность кода, упрощает тестирование и позволяет заменять поставщиков сервисов без переписывания UI и ViewModel.
-
+Работа показала, как использовать Firestore для долговременных структурированных данных, Realtime Database для мгновенных очередей, Firebase Auth для стабильной идентификации пользователя и Remote Config для удалённого управления поведением приложения.

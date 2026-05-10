@@ -1,4 +1,5 @@
 import java.util.Properties
+import groovy.json.JsonSlurper
 
 plugins {
     alias(libs.plugins.android.application)
@@ -23,6 +24,32 @@ fun localValue(name: String): String =
 
 fun buildConfigString(value: String): String =
     "\"${value.replace("\\", "\\\\").replace("\"", "\\\"")}\""
+
+fun googleWebClientIdFromServices(): String {
+    val servicesFile = file("google-services.json")
+    if (!servicesFile.exists()) return ""
+
+    val root = JsonSlurper().parse(servicesFile) as? Map<*, *> ?: return ""
+    val clients = root["client"] as? List<*> ?: return ""
+    return clients
+        .asSequence()
+        .mapNotNull { it as? Map<*, *> }
+        .flatMap { ((it["oauth_client"] as? List<*>) ?: emptyList<Any>()).asSequence() }
+        .mapNotNull { it as? Map<*, *> }
+        .firstOrNull { (it["client_type"] as? Number)?.toInt() == 3 }
+        ?.get("client_id")
+        ?.toString()
+        .orEmpty()
+}
+
+fun firebaseDatabaseUrlFromServices(): String {
+    val servicesFile = file("google-services.json")
+    if (!servicesFile.exists()) return ""
+
+    val root = JsonSlurper().parse(servicesFile) as? Map<*, *> ?: return ""
+    val projectInfo = root["project_info"] as? Map<*, *> ?: return ""
+    return projectInfo["firebase_url"]?.toString().orEmpty()
+}
 
 android {
     namespace = "com.example.buhlograf"
@@ -53,12 +80,23 @@ android {
         buildConfigField("String", "VK_APP_ID", buildConfigString(vkAppId))
         buildConfigField("String", "VK_CLIENT_SECRET", buildConfigString(vkClientSecret))
         buildConfigField("Boolean", "HAS_GOOGLE_SERVICES_JSON", hasGoogleServicesJson.toString())
-        buildConfigField("String", "GOOGLE_WEB_CLIENT_ID", buildConfigString(localValue("GOOGLE_WEB_CLIENT_ID")))
+        buildConfigField(
+            "String",
+            "GOOGLE_WEB_CLIENT_ID",
+            buildConfigString(localValue("GOOGLE_WEB_CLIENT_ID").ifBlank { googleWebClientIdFromServices() })
+        )
+        buildConfigField(
+            "String",
+            "FIREBASE_DATABASE_URL",
+            buildConfigString(localValue("FIREBASE_DATABASE_URL").ifBlank { firebaseDatabaseUrlFromServices() })
+        )
     }
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("debug")
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
@@ -101,6 +139,7 @@ dependencies {
     implementation(platform("com.google.firebase:firebase-bom:34.7.0"))
     implementation("com.google.firebase:firebase-auth")
     implementation("com.google.firebase:firebase-firestore")
+    implementation("com.google.firebase:firebase-database")
     implementation("com.google.firebase:firebase-messaging")
     implementation("com.google.firebase:firebase-analytics")
     implementation("com.google.firebase:firebase-config")
